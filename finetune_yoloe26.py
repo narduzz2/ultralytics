@@ -96,10 +96,25 @@ elif args.trainer == "YOLOEVPTrainer":
     # freeze every layer except of the savpe module.
     head_index = len(model.model.model) - 1
     freeze = list(range(0, head_index))
+    train_layers=[]
+
     for name, child in model.model.model[-1].named_children():
 
-        if "savpe" not in name:
+        print("name:", name)
+
+        if "savpe"  in name:
+            continue
+        if "cv4" in name:
+            # freeze.extend(
+            #     [
+            #         f"{head_index}.{name}.0.norm",
+            #         f"{head_index}.{name}.1.norm",
+            #         f"{head_index}.{name}.2.norm",
+            #     ]  )
+            continue
+        else:
             freeze.append(f"{head_index}.{name}")
+
 
     refer_data=refer_data_yaml
     single_cls=False
