@@ -522,8 +522,8 @@ class RTDETRDEIMTrainer(RTDETRTrainer):
 
     def train(self, *args, **kwargs):
         # DEIM trainer handles augmentation schedule explicitly.
-        # Keep base trainer's close_mosaic hook disabled to avoid overriding DEIM policy.
-        if self.args.close_mosaic:
+        # Keep base trainer's close_mosaic hook disabled only for the DEIM sample-augmentation branch.
+        if self.args.rtdetr_augmentations and self.args.close_mosaic:
             self.args.close_mosaic = 0
         if not self._deim_callback_registered:
             self.add_callback("on_train_epoch_start", self._on_train_epoch_start)
