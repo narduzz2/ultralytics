@@ -194,37 +194,44 @@ class RTDETRTrainer(DetectionTrainer):
 
         use_muon = name == "MuSGD"
         backbone_len = self.backbone_len
-        backbone_lr_scope = str(getattr(self.args, "backbone_lr_scope", "all")).lower()
-        if backbone_lr_scope not in {"all", "dinov3_only"}:
-            raise ValueError(
-                f"Invalid backbone_lr_scope={backbone_lr_scope!r}. Expected one of ['all', 'dinov3_only']."
-            )
-        backbone_lr_matches = 0
+        sta_exclusion_enabled = bool(getattr(self.args, "sta_exclusion", True))
+        sta_tokens = {
+            "sta",
+            "spm",
+            "spatialprior",
+            "spatialpriormodule",
+            "spatialpriormodulev2",
+            "spatial_prior",
+            "spatial_prior_module",
+        }
+        sta_excluded = 0
 
         for module_name, module in model.named_modules():
             for param_name, param in module.named_parameters(recurse=False):
                 fullname = f"{module_name}.{param_name}" if module_name else param_name
 
+                # Check if this is a backbone layer; keep STA params at base LR.
+                is_backbone = False
                 parts = fullname.split(".")
 
                 # Handle DDP wrapping: "module.model.0.conv.weight" vs "model.0.conv.weight"
                 if parts[0] == "module":
                     parts = parts[1:]  # Remove "module" prefix for DDP
 
-                is_backbone_lr_param = False
-                is_dinov3_param = any(p.lower() == "dinov3" for p in parts)
+                is_sta_param = any(p.lower() in sta_tokens for p in parts)
                 if len(parts) > 1 and parts[0] == "model" and parts[1].isdigit():
                     layer_idx = int(parts[1])
                     is_backbone = layer_idx < backbone_len
-                    if is_backbone:
-                        is_backbone_lr_param = backbone_lr_scope == "all" or is_dinov3_param
-                        backbone_lr_matches += int(is_backbone_lr_param)
+                    if sta_exclusion_enabled and is_backbone and is_sta_param:
+                        # Match requested behavior: backbone_lr_ratio applies to backbone except STA branch.
+                        is_backbone = False
+                        sta_excluded += 1
 
                 is_norm_like_param = (
                     isinstance(module, bn) or module.__class__.__name__ == "DEIMRMSNorm" or "logit_scale" in fullname
                 )
 
-                if is_backbone_lr_param:
+                if is_backbone:
                     # Backbone parameters (groups 4, 5, 6, 7)
                     if param.ndim >= 2 and use_muon:
                         g[7][fullname] = param  # backbone muon params
@@ -264,15 +271,10 @@ class RTDETRTrainer(DetectionTrainer):
             )
 
         backbone_lr = lr * backbone_lr_ratio
-        if backbone_lr_scope == "dinov3_only" and backbone_lr_matches == 0:
-            LOGGER.warning(
-                f"{colorstr('optimizer:')} backbone_lr_scope=dinov3_only matched 0 parameter tensors; "
-                "continuing with base LR for all non-matching params."
-            )
         LOGGER.info(
-            f"{colorstr('optimizer:')} backbone low-LR scope={backbone_lr_scope}: "
-            f"{backbone_lr_matches} parameter tensors use backbone_lr "
-            f"(backbone_lr_ratio={backbone_lr_ratio})"
+            f"{colorstr('optimizer:')} backbone low-LR uses backbone slice with "
+            f"sta_exclusion={sta_exclusion_enabled} ({sta_excluded} tensors excluded), "
+            f"backbone_lr_ratio={backbone_lr_ratio}"
         )
 
         if name == "MuSGD":

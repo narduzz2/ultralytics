@@ -34,7 +34,6 @@ lrf: 1.0  # Final learning rate = lr0 * lrf = 0.000001
 momentum: 0.9  # The default value in AdamW implementations
 weight_decay: 0.0001  # L2 regularization (typical for DETR models)
 backbone_lr_ratio: 0.1  # Learning rate ratio for backbone (0.1 means lr0 * 0.1 for backbone)
-backbone_lr_scope: dinov3_only
 clip_grad_norm: 0.1  # Gradient clipping value
 
 # Learning rate scheduler
