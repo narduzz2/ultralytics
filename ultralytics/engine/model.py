@@ -779,11 +779,6 @@ class Model(torch.nn.Module):
                     args["resume"] = False
 
         self.trainer = (trainer or self._smart_load("trainer"))(overrides=args, _callbacks=self.callbacks)
-        defer_to_setup_model = kwargs.get("pretrained") is not None and len(self.ckpt) == 0
-        # # YAML + pretrained path: let Trainer.setup_model() build and load once.
-        if not args.get("resume") and not defer_to_setup_model:  # manually set model only if not resuming
-            self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml)
-            self.model = self.trainer.model
 
         self.trainer.train()
         # Update model and cfg after training
