@@ -201,31 +201,7 @@ class DeepOCSORT(OCSORT):
         lost_stracks = []
         removed_stracks = []
 
-        scores = results.conf.copy()
-
-        # BoostTrack++ soft confidence boost with adaptive tracklet threshold
-        active_tracks = [t for t in self.tracked_stracks if t.is_activated]
-        if active_tracks and len(results) > 0:
-            from ultralytics.utils.metrics import bbox_ioa
-            det_boxes = results.xyxy if hasattr(results, 'xyxy') else None
-            if det_boxes is not None and len(det_boxes) > 0:
-                track_boxes = np.array([t.xyxy for t in active_tracks])
-                ious = bbox_ioa(
-                    np.ascontiguousarray(det_boxes, dtype=np.float32),
-                    np.ascontiguousarray(track_boxes, dtype=np.float32),
-                    iou=True,
-                )
-                # Adaptive threshold per tracklet: beta_j = max(0.8, 0.95 - 0.0075*(frames_since_update-1))
-                for j, track in enumerate(active_tracks):
-                    frames_since = self.frame_id - track.frame_id
-                    beta_j = max(0.8, 0.95 - 0.0075 * max(frames_since - 1, 0))
-                    ious[:, j] = np.where(ious[:, j] < beta_j, 0.0, ious[:, j])
-                max_sim = ious.max(axis=1) if ious.shape[1] > 0 else np.zeros(len(scores))
-                # Soft boost: c_new = max(c_orig, alpha*c_orig + (1-alpha)*sim^q)
-                alpha, q = 0.65, 1.5
-                boosted = alpha * scores + (1 - alpha) * np.power(max_sim, q)
-                scores = np.maximum(scores, boosted)
-
+        scores = results.conf
         remain_inds = scores >= self.args.track_high_thresh
         inds_low = scores > self.args.track_low_thresh
         inds_high = scores < self.args.track_high_thresh
