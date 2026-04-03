@@ -25,7 +25,7 @@ download: |
   from pathlib import Path
 
   from ultralytics.utils.downloads import download
-  from ultralytics.utils import ASSETS_URL, TQDM
+  from ultralytics.utils import TQDM
 
 
   def crowdhuman_to_yolo(dir):
@@ -35,7 +35,7 @@ download: |
       Each .odgt file contains one JSON object per line with format:
           {"ID": "image_id", "gtboxes": [{"tag": "person", "fbox": [x, y, w, h], ...}, ...]}
       """
-      for split in ("train", "val", "test"):
+      for split in ("train", "val"):
           annot_file = dir / f"annotation_{split}.odgt"
           img_dir = dir / "images" / split
           label_dir = dir / "labels" / split
@@ -91,10 +91,37 @@ download: |
               label_file.write_text("".join(labels))
 
 
-  # Download
-  dir = Path(yaml["path"])  # dataset root dir
-  url = f"{ASSETS_URL}/CrowdHuman.zip"
-  download([url], dir=dir, threads=1)
+  def move_images(src_dir, dst_dir):
+      """Recursively find and move all image files from src_dir to dst_dir."""
+      dst_dir.mkdir(parents=True, exist_ok=True)
+      for ext in ("*.jpg", "*.jpeg", "*.png"):
+          for f in src_dir.rglob(ext):
+              shutil.move(str(f), str(dst_dir / f.name))
 
-  # Convert annotations to YOLO format
+
+  # Download from HuggingFace (original author's upload)
+  dir = Path(yaml["path"])  # dataset root dir
+  hf_url = "https://huggingface.co/datasets/sshao0516/CrowdHuman/resolve/main"
+
+  # Download annotation files
+  download([f"{hf_url}/annotation_train.odgt", f"{hf_url}/annotation_val.odgt"], dir=dir)
+
+  # Download and extract each zip to its own temp directory to avoid skipped extractions
+  tmp = dir / "_tmp"
+  for split, zips in [
+      ("train", ["CrowdHuman_train01.zip", "CrowdHuman_train02.zip", "CrowdHuman_train03.zip"]),
+      ("val", ["CrowdHuman_val.zip"]),
+      ("test", ["CrowdHuman_test.zip"]),
+  ]:
+      for z in zips:
+          zip_tmp = tmp / Path(z).stem
+          zip_tmp.mkdir(parents=True, exist_ok=True)
+          download([f"{hf_url}/{z}"], dir=zip_tmp)
+          move_images(zip_tmp, dir / "images" / split)
+          shutil.rmtree(zip_tmp)
+
+  if tmp.exists():
+      shutil.rmtree(tmp)
+
+  # Convert annotations to YOLO format (test has no annotations)
   crowdhuman_to_yolo(dir)
