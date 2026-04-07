@@ -11,6 +11,7 @@ import torch
 from ultralytics.utils import IS_JETSON, LOGGER, TORCH_VERSION, ThreadingLocked
 from ultralytics.utils.torch_utils import TORCH_2_4, TORCH_2_9
 
+
 def best_onnx_opset(onnx: types.ModuleType, cuda: bool = False) -> int:
     """Return max ONNX opset for this torch version with ONNX fallback."""
     if TORCH_2_4:  # _constants.ONNX_MAX_OPSET first defined in torch 1.13
