@@ -27,6 +27,10 @@ from ultralytics.nn.image_encoder import ImageEncoderModel
 from ultralytics.nn.teacher_model import TEACHER_REGISTRY, build_teacher_model, safe_key
 from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 
+# DataComp-12M has images up to ~268M pixels. PIL raises DecompressionBombError above 179M pixels,
+# crashing DataLoader workers despite wds.warn_and_continue. Standard for web-crawled pipelines.
+Image.MAX_IMAGE_PIXELS = None
+
 # ImageNet normalization (used by EUPE, DINOv3, SigLIP2, SAM3 -- standard for ViT models)
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -114,6 +118,9 @@ class ImageEncoderTrainer(ClassificationTrainer):
         if overrides is None:
             overrides = {}
         overrides.setdefault("close_mosaic", 0)  # no mosaic in distillation, avoids .reset() call
+        # Use bf16 instead of fp16 for AMP: fp16 backbone produces nan on ~5% of DataComp-12M batches
+        # due to limited exponent range (max 65504). bf16 matches fp32 range. Follows EUPE/DUNE convention.
+        torch.set_autocast_dtype("cuda", torch.bfloat16)
         # Support both 'teacher_name' (single) and 'teacher_names' (multi, '+' separated)
         raw = overrides.pop("teacher_names", overrides.pop("teacher_name", "eupe:vitb16"))
         self.teacher_names = raw.split("+") if isinstance(raw, str) else raw
