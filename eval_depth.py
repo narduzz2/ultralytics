@@ -47,12 +47,15 @@ def load_nyu_mat(mat_path: str) -> tuple[np.ndarray, np.ndarray]:
     """
     print(f"Loading {mat_path}...")
     with h5py.File(mat_path, "r") as f:
-        images = np.array(f["images"])  # (3, W, H, N) in the .mat format
-        depths = np.array(f["depths"])   # (W, H, N)
+        # h5py reads MATLAB v7.3 HDF5 with transposed dims:
+        #   images: (N, 3, W, H) in h5py → need (N, H, W, 3) RGB
+        #   depths: (N, W, H) in h5py → need (N, H, W)
+        images = np.array(f["images"])  # (1449, 3, 640, 480)
+        depths = np.array(f["depths"])  # (1449, 640, 480)
 
-    # Transpose to (N, H, W, 3) and (N, H, W)
-    images = np.transpose(images, (3, 2, 1, 0))  # (N, H, W, 3)
-    depths = np.transpose(depths, (2, 1, 0))       # (N, H, W)
+    # Transpose: (N, 3, W, H) → (N, H, W, 3) and (N, W, H) → (N, H, W)
+    images = np.transpose(images, (0, 3, 2, 1))  # (N, H, W, 3)
+    depths = np.transpose(depths, (0, 2, 1))       # (N, H, W)
 
     print(f"Loaded {images.shape[0]} images, shape={images.shape[1:3]}, depth range=[{depths.min():.2f}, {depths.max():.2f}]m")
     return images, depths
@@ -61,31 +64,32 @@ def load_nyu_mat(mat_path: str) -> tuple[np.ndarray, np.ndarray]:
 def get_eigen_test_indices(n_total: int = 1449) -> list[int]:
     """Get the 654 Eigen test split indices.
 
-    Tries to download the official split file; falls back to the standard
-    hardcoded split indices if download fails.
+    Loads from pre-saved .npy file, falls back to downloading from NYU website.
     """
+    # Try pre-saved file first
+    npy_path = Path("/data/depth_anything/eigen_test_indices.npy")
+    if npy_path.exists():
+        indices = np.load(str(npy_path)).tolist()
+        print(f"Loaded {len(indices)} Eigen test indices from {npy_path}")
+        return indices
+
+    # Fall back to downloading splits.mat from NYU
     try:
         import urllib.request
-        cache_path = Path("/tmp/nyu_eigen_test_indices.txt")
+        import scipy.io
+        cache_path = Path("/tmp/splits.mat")
         if not cache_path.exists():
-            urllib.request.urlretrieve(EIGEN_TEST_INDICES_URL, str(cache_path))
-        with open(cache_path) as f:
-            # Format: each line is "path index" or just "index"
-            indices = []
-            for line in f:
-                parts = line.strip().split()
-                if parts:
-                    idx = int(parts[-1])
-                    indices.append(idx)
-            return indices
-    except Exception:
-        pass
-
-    # Fallback: standard 654 test indices
-    # These are the ones used in Eigen et al. (NIPS 2014) and all subsequent works
-    # We use every other frame from 0-1448 as a simple approximation if we can't get the exact split
-    print("WARNING: Could not download Eigen split, using all 1449 images as fallback")
-    return list(range(n_total))
+            urllib.request.urlretrieve(
+                "http://horatio.cs.nyu.edu/mit/silberman/indoor_seg_sup/splits.mat",
+                str(cache_path),
+            )
+        splits = scipy.io.loadmat(str(cache_path))
+        indices = (splits["testNdxs"].flatten() - 1).tolist()  # MATLAB 1-indexed → 0-indexed
+        print(f"Loaded {len(indices)} Eigen test indices from splits.mat")
+        return indices
+    except Exception as e:
+        print(f"WARNING: Could not load Eigen split ({e}), using all {n_total} images")
+        return list(range(n_total))
 
 
 def eigen_crop(pred: np.ndarray, gt: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
