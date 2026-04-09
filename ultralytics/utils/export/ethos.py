@@ -12,9 +12,9 @@ from ultralytics.utils import LOGGER, YAML
 def torch2ethos(
     model: torch.nn.Module, file: Path | str, sample_input: torch.Tensor, metadata: dict | None = None, prefix: str = ""
 ) -> str:
-    """Export PyTorch model to Arm Ethos-U NPU using ExecuTorch.    
+    """Export PyTorch model to Arm Ethos-U NPU using ExecuTorch.
     
-    Args:     
+    Args:
         model (torch.nn.Module): PyTorch model to export.
         file (Path | str): Output file path for the exported model. The file extension should be .pte.
         sample_input (torch.Tensor): Example input tensor to trace the model.
@@ -26,7 +26,6 @@ def torch2ethos(
         str: Path to the directory containing the exported model and metadata.
     
     """
-
     from executorch import version as executorch_version
     from executorch.backends.arm.ethosu import EthosUCompileSpec
     from executorch.backends.arm.quantizer import EthosUQuantizer, get_symmetric_quantization_config
