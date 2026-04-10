@@ -30,7 +30,8 @@ def torch2ethos(
         (str): Path to the exported ExecuTorch with ARM Ethos-U Backend model directory.
     """
     check_executorch_requirements()
-    check_requirements(["tosa-tools", "ethos-u-vela"])
+    check_requirements("tosa-tools")
+    check_requirements("ethos-u-vela")
 
     from executorch import version as executorch_version
     from executorch.backends.arm.ethosu import EthosUCompileSpec
