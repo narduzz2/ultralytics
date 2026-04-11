@@ -1306,18 +1306,21 @@ class SemanticSegLoss(nn.Module):
         self.device = next(model.parameters()).device
         self.dtype = next(model.parameters()).dtype
         self.use_ohem = bool(getattr(model.args, "use_ohem", True))
+        data_arg = str(getattr(model.args, "data", "") or "").lower()
+        self.use_cityscapes_weight = "cityscapes" in data_arg and self.nc == len(cityscapes_weight)
+        ce_weight = cityscapes_weight if self.use_cityscapes_weight else None
         if self.use_ohem:
             self.ce = OhemCELoss(
                 thresh=float(getattr(model.args, "ohem_thresh", 0.7)),
                 ratio=1 / 16,
                 ignore_index=255,
-                use_weight=True,
-                weight=cityscapes_weight,
+                use_weight=self.use_cityscapes_weight,
+                weight=ce_weight,
             ).to(device=self.device, dtype=self.dtype)
         else:
-            self.ce = nn.CrossEntropyLoss(ignore_index=255, weight=cityscapes_weight.clone()).to(
-                device=self.device, dtype=self.dtype
-            )
+            self.ce = nn.CrossEntropyLoss(
+                ignore_index=255, weight=ce_weight.clone() if ce_weight is not None else None
+            ).to(device=self.device, dtype=self.dtype)
         self.ce_weight = float(getattr(model.args, "ce_weight", 1.0))
         self.dice_weight = float(getattr(model.args, "dice_weight", 1.0))
         self.aux_weight = float(getattr(model.args, "aux_weight", 0.4))
