@@ -1604,6 +1604,168 @@ class RandomFlip:
         return labels
 
 
+class PhotoMetricDistortion:
+    """Apply photometric distortion to image sequentially, every transformation
+    is applied with a probability of 0.5. The position of random contrast is in
+    second or second to last.
+
+    1. random brightness
+    2. random contrast (mode 0)
+    3. convert color from BGR to HSV
+    4. random saturation
+    5. random hue
+    6. convert color from HSV to BGR
+    7. random contrast (mode 1)
+
+    Required Keys:
+
+    - img
+
+    Modified Keys:
+
+    - img
+
+    Args:
+        brightness_delta (int): delta of brightness.
+        contrast_range (tuple): range of contrast.
+        saturation_range (tuple): range of saturation.
+        hue_delta (int): delta of hue.
+    """
+
+    def __init__(
+        self,
+        brightness_delta=32,
+        contrast_range=(0.5, 1.5),
+        saturation_range=(0.5, 1.5),
+        hue_delta=18,
+    ):
+        self.brightness_delta = brightness_delta
+        self.contrast_lower, self.contrast_upper = contrast_range
+        self.saturation_lower, self.saturation_upper = saturation_range
+        self.hue_delta = hue_delta
+
+    @staticmethod
+    def _bgr2hsv(img: np.ndarray) -> np.ndarray:
+        """Convert a BGR image to HSV without relying on mmcv."""
+        return cv2.cvtColor(np.ascontiguousarray(img), cv2.COLOR_BGR2HSV)
+
+    @staticmethod
+    def _hsv2bgr(img: np.ndarray) -> np.ndarray:
+        """Convert an HSV image to BGR without relying on mmcv."""
+        return cv2.cvtColor(np.ascontiguousarray(img), cv2.COLOR_HSV2BGR)
+
+    def convert(self, img: np.ndarray, alpha: float = 1.0, beta: float = 0.0) -> np.ndarray:
+        """Multiple with alpha and add beat with clip.
+
+        Args:
+            img (np.ndarray): The input image.
+            alpha (float): Image weights, change the contrast/saturation
+                of the image. Default: 1
+            beta (float): Image bias, change the brightness of the
+                image. Default: 0
+
+        Returns:
+            np.ndarray: The transformed image.
+        """
+
+        dtype = img.dtype
+        img = img.astype(np.float32) * alpha + beta
+        img = np.clip(img, 0, 255)
+        return img.astype(dtype)
+
+    def brightness(self, img: np.ndarray) -> np.ndarray:
+        """Brightness distortion.
+
+        Args:
+            img (np.ndarray): The input image.
+        Returns:
+            np.ndarray: Image after brightness change.
+        """
+
+        if random.randint(0, 1):
+            return self.convert(img, beta=random.uniform(-self.brightness_delta, self.brightness_delta))
+        return img
+
+    def contrast(self, img: np.ndarray) -> np.ndarray:
+        """Contrast distortion.
+
+        Args:
+            img (np.ndarray): The input image.
+        Returns:
+            np.ndarray: Image after contrast change.
+        """
+
+        if random.randint(0, 1):
+            return self.convert(img, alpha=random.uniform(self.contrast_lower, self.contrast_upper))
+        return img
+
+    def saturation(self, img: np.ndarray) -> np.ndarray:
+        """Saturation distortion.
+
+        Args:
+            img (np.ndarray): The input image.
+        Returns:
+            np.ndarray: Image after saturation change.
+        """
+
+        if random.randint(0, 1):
+            img = self._bgr2hsv(img)
+            img[:, :, 1] = self.convert(
+                img[:, :, 1], alpha=random.uniform(self.saturation_lower, self.saturation_upper)
+            )
+            img = self._hsv2bgr(img)
+        return img
+
+    def hue(self, img: np.ndarray) -> np.ndarray:
+        """Hue distortion.
+
+        Args:
+            img (np.ndarray): The input image.
+        Returns:
+            np.ndarray: Image after hue change.
+        """
+
+        if random.randint(0, 1):
+            img = self._bgr2hsv(img)
+            img[:, :, 0] = (
+                img[:, :, 0].astype(np.int16) + random.randint(-self.hue_delta, self.hue_delta)
+            ) % 180
+            img = self._hsv2bgr(img)
+        return img
+
+    def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Transform function to perform photometric distortion on images.
+
+        Args:
+            results (dict): Result dict from loading pipeline.
+
+        Returns:
+            dict: Result dict with images distorted.
+        """
+        img = labels["img"]
+        # random brightness
+        img = self.brightness(img)
+
+        # mode == 0 --> do random contrast first
+        # mode == 1 --> do random contrast last
+        mode = random.randint(0, 1)
+        if mode == 1:
+            img = self.contrast(img)
+
+        # random saturation
+        img = self.saturation(img)
+
+        # random hue
+        img = self.hue(img)
+
+        # random contrast
+        if mode == 0:
+            img = self.contrast(img)
+
+        labels["img"] = img
+        return labels
+
+
 class LetterBox:
     """Resize image and padding for detection, instance segmentation, pose.
 
