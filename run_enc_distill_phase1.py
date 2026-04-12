@@ -9,10 +9,15 @@ import torch
 from callbacks import beta2_override, grad_clip, wandb_config
 from ultralytics import YOLO
 from ultralytics.models.yolo.classify.train_image_encoder import ImageEncoderTrainer
+from ultralytics.utils.knn_eval import knn_callback
 
 RECIPES = {
     "default": dict(lr0=3e-4, weight_decay=0.05, warmup_epochs=1, epochs=10, momentum=0.9, grad_clip=3.0, beta2=None),
-    "unic": dict(lr0=6e-4, weight_decay=0.03, warmup_epochs=2, epochs=30, momentum=0.9, grad_clip=None, beta2=0.99),
+    # EUPE Stage 2: proxy->student distillation (arXiv:2603.22387 Sec 4.1, ssl_default_config.yaml:131-147)
+    # Same loss as ours (0.9cos+0.1L1, Eq.5-6). beta2=None -> uses default 0.999 matching EUPE
+    "eupe": dict(lr0=2e-5, weight_decay=1e-4, warmup_epochs=1, epochs=30, momentum=0.9, grad_clip=3.0, beta2=None),
+    # AM-RADIO: multi-teacher distillation (arXiv:2312.06709 Sec 4, Eq.2-3)
+    # Same loss as ours (0.9cos+0.1L1). beta2=0.95 from MobileCLIP2 (training/configs/run_dfndr2b.sh)
     "radio": dict(lr0=1e-3, weight_decay=0.02, warmup_epochs=1, epochs=30, momentum=0.9, grad_clip=1.0, beta2=0.95),
 }
 
@@ -35,7 +40,7 @@ def main(argv: list[str]) -> None:
 
     Args:
         argv: [gpu, teachers, name, recipe, model_yaml]
-        recipe: "default", "unic", or "radio"
+        recipe: "default", "eupe", or "radio"
         model_yaml: e.g. "yolo26s-cls.yaml" or "yolo26l-cls.yaml"
     """
     argv, resume = _pop_resume(argv[1:])
@@ -67,6 +72,8 @@ def main(argv: list[str]) -> None:
             wandb_group="distill",
         ),
     )
+    # kNN eval on ImageNet every 5 epochs (EUPE/RADIO protocol: k=20, T=0.07)
+    model.add_callback("on_fit_epoch_end", knn_callback("/data/shared-datasets/imagenet", every_n_epochs=5))
     train_args = dict(
         trainer=ImageEncoderTrainer,
         teachers=teachers,
