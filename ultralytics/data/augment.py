@@ -1472,8 +1472,9 @@ class SemanticRandomScaleCrop:
         scale_max (float): Maximum scale factor.
     """
 
-    def __init__(self, crop_size=512, scale_min=0.5, scale_max=2.0):
+    def __init__(self, size_range=(512, 2048), crop_size=512, scale_min=0.5, scale_max=2.0):
         """Initialize SemanticRandomScaleCrop."""
+        self.size_range = (size_range, size_range) if isinstance(size_range, int) else tuple(size_range)
         self.crop_size = (crop_size, crop_size) if isinstance(crop_size, int) else tuple(crop_size)
         self.scale_min = scale_min
         self.scale_max = scale_max
@@ -1485,7 +1486,8 @@ class SemanticRandomScaleCrop:
 
         # Random scale
         scale = random.uniform(self.scale_min, self.scale_max)
-        new_h, new_w = int(h * scale), int(w * scale)
+        size = int(self.size_range[0] * scale), int(self.size_range[1] * scale)
+        new_w, new_h = rescale_size((h, w), size)
         img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
         if "semantic_mask" in labels and labels["semantic_mask"] is not None:
@@ -1511,6 +1513,76 @@ class SemanticRandomScaleCrop:
             labels["semantic_mask"] = labels["semantic_mask"][y0 : y0 + crop_h, x0 : x0 + crop_w]
 
         return labels
+
+
+class SemanticResize:
+    """Resize transform for semantic segmentation validation.
+
+    Scales image proportionally using the larger of (target_w / img_w, target_h / img_h),
+    then center-crops to the exact target size.
+
+    Attributes:
+        size (tuple): Target (w, h) after resize and crop.
+    """
+
+    def __init__(self, size_range=(2048, 512), stride=32):
+        """Initialize SemanticResize.
+
+        Args:
+            size_range (list | tuple): Target size range as [max_long_edge, max_short_edge].
+            stride (int): Align output dimensions to this stride (e.g. 32 for YOLO).
+        """
+        self.size_range = tuple(size_range)
+        self.stride = stride
+
+    def __call__(self, labels):
+        """Apply proportional resize and center crop to image and semantic mask."""
+        img = labels["img"]
+
+        new_w, new_h = rescale_size(img.shape[:2], self.size_range)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+        if "semantic_mask" in labels and labels["semantic_mask"] is not None:
+            labels["semantic_mask"] = cv2.resize(
+                labels["semantic_mask"], (new_w, new_h), interpolation=cv2.INTER_NEAREST
+            )
+
+        # Pad to stride multiples to avoid misalignment in encoder-decoder concat
+        if self.stride > 1:
+            pad_w = (self.stride - new_w % self.stride) % self.stride
+            pad_h = (self.stride - new_h % self.stride) % self.stride
+            if pad_w > 0 or pad_h > 0:
+                img = cv2.copyMakeBorder(img, 0, pad_h, 0, pad_w, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+                if "semantic_mask" in labels and labels["semantic_mask"] is not None:
+                    labels["semantic_mask"] = cv2.copyMakeBorder(
+                        labels["semantic_mask"], 0, pad_h, 0, pad_w, cv2.BORDER_CONSTANT, value=255
+                    )
+
+        labels["img"] = img
+        return labels
+
+
+def rescale_size(old_size, size_range):
+    h, w = old_size
+    max_long_edge = max(size_range)
+    max_short_edge = min(size_range)
+    if max_long_edge / max(h, w) <= max_short_edge / min(h, w):
+        scale_factor = max_long_edge / max(h, w)
+        if h >= w:
+            new_h = max_long_edge
+            new_w = int(w * float(scale_factor) + 0.5)
+        else:
+            new_w = max_long_edge
+            new_h = int(h * float(scale_factor) + 0.5)
+    else:
+        scale_factor = max_short_edge / min(h, w)
+        if h >= w:
+            new_w = max_short_edge
+            new_h = int(h * float(scale_factor) + 0.5)
+        else:
+            new_h = max_short_edge
+            new_w = int(w * float(scale_factor) + 0.5)
+    return new_w, new_h
 
 
 class RandomFlip:

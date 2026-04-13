@@ -33,6 +33,8 @@ from .augment import (
     classify_augmentations,
     classify_transforms,
     v8_transforms,
+    SemanticRandomScaleCrop,
+    SemanticResize
 )
 from .base import BaseDataset
 from .converter import merge_multi_segment
@@ -856,6 +858,43 @@ class SemanticDataset(BaseDataset):
         self.mask_ims = [None] * len(labels)
         return labels
 
+    def load_image(self, i, rect_mode=True):
+        """Load an image without resizing, keeping original dimensions for semantic segmentation.
+
+        Scaling and cropping are handled by transforms (SemanticRandomScaleCrop for train,
+        SemanticResize for val) instead of at load time.
+        """
+        im, f, fn = self.ims[i], self.im_files[i], self.npy_files[i]
+        if im is None:  # not cached in RAM
+            if fn.exists():  # load npy
+                try:
+                    im = np.load(fn)
+                except Exception as e:
+                    LOGGER.warning(f"{self.prefix}Removing corrupt *.npy image file {fn} due to: {e}")
+                    Path(fn).unlink(missing_ok=True)
+                    im = imread(f, flags=self.cv2_flag)  # BGR
+            else:  # read image
+                im = imread(f, flags=self.cv2_flag)  # BGR
+            if im is None:
+                raise FileNotFoundError(f"Image Not Found {f}")
+
+            h0, w0 = im.shape[:2]  # orig hw
+            if im.ndim == 2:
+                im = im[..., None]
+
+            # Add to buffer if training with augmentations
+            if self.augment:
+                self.ims[i], self.im_hw0[i], self.im_hw[i] = im, (h0, w0), im.shape[:2]
+                self.buffer.append(i)
+                if 1 < len(self.buffer) >= self.max_buffer_length:  # prevent empty buffer
+                    j = self.buffer.pop(0)
+                    if self.cache != "ram":
+                        self.ims[j], self.im_hw0[j], self.im_hw[j] = None, None, None
+
+            return im, (h0, w0), im.shape[:2]
+
+        return self.ims[i], self.im_hw0[i], self.im_hw[i]
+
     def set_rectangle(self):
         """Sort by aspect ratio and sync mask-related lists with reordered images/labels."""
         super().set_rectangle()
@@ -976,8 +1015,7 @@ class SemanticDataset(BaseDataset):
             im = imread(self.im_files[i], flags=self.cv2_flag)
             if im is None:
                 continue
-            ratio = self.imgsz / max(im.shape[0], im.shape[1])
-            b += im.nbytes * ratio**2  # image cache in BaseDataset is resized
+            b += im.nbytes  # images are stored at original size (no pre-resize)
 
             mask = self._read_mask_file(self.mask_files[i])
             if mask is not None:
@@ -1027,29 +1065,13 @@ class SemanticDataset(BaseDataset):
         """
         transforms = []
         if self.augment:
-            from ultralytics.data.augment import Mosaic, RandomPerspective, SemanticRandomScaleCrop
-            transforms = []
-            # mosaic = Mosaic(self, imgsz=self.imgsz, p=getattr(hyp, "mosaic", 1.0) if hyp else 1.0)
-            # affine = RandomPerspective(
-            #     degrees=getattr(hyp, "degrees", 0.0) if hyp else 0.0,
-            #     translate=getattr(hyp, "translate", 0.1) if hyp else 0.1,
-            #     scale=getattr(hyp, "scale", 0.5) if hyp else 0.5,
-            #     shear=getattr(hyp, "shear", 0.0) if hyp else 0.0,
-            #     perspective=getattr(hyp, "perspective", 0.0) if hyp else 0.0,
-            #     pre_transform=LetterBox(new_shape=(self.imgsz, self.imgsz)),
-            # )
-            # transforms = [mosaic, affine]
-            # if hyp:
-            #     transforms.append(
-            #         RandomHSV(
-            #             hgain=getattr(hyp, "hsv_h", 0.015),
-            #             sgain=getattr(hyp, "hsv_s", 0.7),
-            #             vgain=getattr(hyp, "hsv_v", 0.4),
-            #         )
-            #     )
             crop_size = self.data.get("crop_size", 512)
-            transforms.append(SemanticRandomScaleCrop(crop_size=crop_size))
+            size_range = self.data.get("size_range", [self.imgsz, self.imgsz])
+            transforms.append(SemanticRandomScaleCrop(size_range=size_range, crop_size=crop_size))
             transforms.append(RandomFlip(p=0.5, direction="horizontal"))
+        else:
+            size_range = self.data.get("size_range", [self.imgsz, self.imgsz])
+            transforms.append(SemanticResize(size_range=size_range))
         transforms.append(SemanticFormat())
         return Compose(transforms)
 

@@ -1,6 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
-# Cityscapes8 mini semantic segmentation dataset (8 images) for quick-start testing
-# Documentation: https://docs.ultralytics.com/datasets/semantic/cityscapes8
+# Cityscapes semantic segmentation dataset (19 classes)
+# Documentation: https://www.cityscapes-dataset.com/
 
 # Dataset root directory
 path: cityscapes
@@ -8,9 +8,10 @@ train: images/train
 val: images/val
 test: images/test
 
-# Semantic mask directory (PNG files, pixel values = class IDs, 255 = ignore/void)
+# Semantic mask directory (PNG files, pixel values = class IDs 0-18, 255 = ignore/void)
 masks_dir: masks
 crop_size: 1024
+size_range: [1024, 2048]
 
 # Cityscapes 19-class labels
 names:
