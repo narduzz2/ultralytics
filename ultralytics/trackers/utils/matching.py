@@ -1,5 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
+from __future__ import annotations
+
 import numpy as np
 import scipy
 from scipy.spatial.distance import cdist
@@ -110,7 +112,7 @@ def iou_distance(atracks: list, btracks: list) -> np.ndarray:
     return 1 - ious  # cost matrix
 
 
-def l2_distance(atracks: list, btracks: list, img_shape: tuple = None) -> np.ndarray:
+def l2_distance(atracks: list, btracks: list, img_shape: tuple | None = None) -> np.ndarray:
     """Compute cost based on L2 (Euclidean) distance between bounding box centers, normalized by image diagonal.
 
     Args:
