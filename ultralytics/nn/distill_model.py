@@ -46,22 +46,17 @@ class DistillationModel(nn.Module):
         >>> model = DistillationModel(teacher_model="yolo26s.pt", student_model="yolo26n.pt")
     """
 
-    def __init__(self, teacher_model: str | nn.Module, student_model: nn.Module, feats_idx=None):
+    def __init__(self, teacher_model: str | nn.Module, student_model: nn.Module):
         """Initialize the distillation model with teacher, student, and feature extraction hooks.
 
         Args:
             teacher_model (str | nn.Module): Teacher model checkpoint path or module.
             student_model (nn.Module): Student model module to be trained.
-            feats_idx (list, optional): Layer indices for feature extraction. Auto-detected from the
-                Detect head if None.
         """
         super().__init__()
         if isinstance(teacher_model, str):
             teacher_model = load_checkpoint(teacher_model)[0]
-        if feats_idx is None:
-            feats_idx = self.get_distill_layers(student_model)
-        elif isinstance(feats_idx, int):
-            feats_idx = [feats_idx]
+        feats_idx = self.get_distill_layers(student_model)
         device = next(student_model.parameters()).device
         self.teacher_model = teacher_model.to(device)
         self._freeze_teacher()

@@ -173,7 +173,6 @@ class DetectionTrainer(BaseTrainer):
             model = DistillationModel(
                 student_model=student_model,
                 teacher_model=weights.teacher_model,
-                feats_idx=self.args.distill_layer,
             )
             incompatible = model.load_from_module(weights, strict=False)
             if verbose and RANK == -1:

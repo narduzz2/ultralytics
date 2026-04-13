@@ -347,7 +347,6 @@ class BaseTrainer:
             self.model = DistillationModel(
                 student_model=self.model,
                 teacher_model=teacher,
-                feats_idx=self.args.distill_layer,
             ).to(self.device)
             if "teacher_model." not in self.freeze_layer_names:
                 self.freeze_layer_names += ["teacher_model."]
