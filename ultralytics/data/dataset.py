@@ -841,8 +841,31 @@ class ClassificationDataset:
 class ReidDataset(ClassificationDataset):
     """Dataset class for person re-identification tasks.
 
-    This subclasses `ClassificationDataset` to reuse verified-image caching, transform construction, and image loading
-    while keeping ReID-specific filename parsing and pid/camid metadata.
+    Supports two directory layouts, auto-detected at init time:
+
+    1. **Folder-per-identity** (classification-style, recommended for custom data)::
+
+           train/
+             0001/
+               img_a.jpg
+               img_b.jpg
+             0002/
+               img_c.jpg
+
+       Identity labels come from folder names (like ImageFolder). Camera IDs
+       are either parsed from filenames if ``filename_re`` is set, or assigned
+       as a unique index per image (safe default for evaluation).
+
+    2. **Flat directory** (standard benchmarks: Market-1501, DukeMTMC, MSMT17)::
+
+           bounding_box_train/
+             0001_c1s1_001051_00.jpg
+             0002_c2s1_000801_00.jpg
+
+       Identity and camera IDs are extracted from filenames via regex.
+
+    Subclasses ``ClassificationDataset`` to reuse verified-image caching,
+    transform construction, and image loading.
     """
 
     # Default filename patterns for common ReID datasets (group1=pid, group2=camid)
@@ -853,7 +876,15 @@ class ReidDataset(ClassificationDataset):
     }
 
     def __init__(self, root: str, args, augment: bool = False, prefix: str = "", data: dict | None = None):
-        """Initialize a ReID dataset."""
+        """Initialize a ReID dataset.
+
+        Args:
+            root (str): Path to the image directory (flat or folder-per-identity).
+            args: Dataset and augmentation configuration.
+            augment (bool): Whether to apply training augmentations.
+            prefix (str): Prefix for logging and cache filenames.
+            data (dict | None): Dataset YAML config (filename_re, cam_0indexed, etc.).
+        """
         self.data = data or {}
         self.pid_to_label = {}
         self.pid_to_indices = defaultdict(list)
@@ -876,9 +907,97 @@ class ReidDataset(ClassificationDataset):
             raise FileNotFoundError(f"ReID dataset path not found: {root}")
         return None
 
+    @staticmethod
+    def _is_folder_per_identity(root_path: Path) -> bool:
+        """Check if the directory uses folder-per-identity layout (has subdirs with images)."""
+        for child in root_path.iterdir():
+            if child.is_dir():
+                # Check if the subdirectory contains at least one image
+                for f in child.iterdir():
+                    if f.is_file() and f.suffix[1:].lower() in IMG_FORMATS:
+                        return True
+        return False
+
     def get_samples(self) -> list[tuple]:
-        """Parse ReID samples from a flat image directory using a configurable filename regex."""
+        """Discover ReID samples from either folder-per-identity or flat directory layout.
+
+        Auto-detects the layout: if the root contains subdirectories with images, uses
+        folder names as identity labels (classification-style). Otherwise falls back to
+        flat-directory regex parsing for standard benchmarks.
+
+        Returns:
+            list[tuple]: List of (image_path, pid, camid) tuples.
+        """
         root_path = Path(self.root)
+
+        # Auto-detect: folder-per-identity vs flat directory.
+        # Explicit filename_re in the YAML forces flat-directory mode.
+        if "filename_re" not in self.data and self._is_folder_per_identity(root_path):
+            return self._get_samples_folder(root_path)
+        return self._get_samples_flat(root_path)
+
+    def _get_samples_folder(self, root_path: Path) -> list[tuple]:
+        """Parse samples from folder-per-identity layout (classification-style).
+
+        Each subdirectory name is treated as a person ID. Camera IDs are extracted
+        from filenames if ``filename_re`` is set in the data config; otherwise each
+        image gets a unique camera ID (safe for evaluation and training).
+
+        Args:
+            root_path (Path): Root directory containing identity subfolders.
+
+        Returns:
+            list[tuple]: List of (image_path, pid, camid) tuples.
+        """
+        # Optional filename regex for camera ID extraction inside folders
+        re_str = self.data.get("filename_re")
+        cam_pattern = re.compile(self.PATTERNS.get(re_str, re_str), re.IGNORECASE) if re_str else None
+        cam_offset = 0 if self.data.get("cam_0indexed", False) else -1
+
+        samples = []
+        global_idx = 0
+        for identity_dir in sorted(root_path.iterdir()):
+            if not identity_dir.is_dir():
+                continue
+            try:
+                pid = int(identity_dir.name)
+            except ValueError:
+                pid = hash(identity_dir.name) % (2**31)  # non-numeric folder names
+            if pid < 0:
+                continue
+            if pid == 0 and self.augment:
+                continue
+
+            for img_path in sorted(identity_dir.iterdir()):
+                if not img_path.is_file() or img_path.suffix[1:].lower() not in IMG_FORMATS:
+                    continue
+                camid = global_idx  # default: unique per image
+                if cam_pattern is not None:
+                    m = cam_pattern.match(img_path.name)
+                    if m:
+                        try:
+                            camid = int(m.group(2)) + cam_offset
+                        except (IndexError, ValueError):
+                            pass
+                samples.append((str(img_path), pid, camid))
+                global_idx += 1
+
+        if samples:
+            LOGGER.info(f"{self.prefix}Using folder-per-identity layout ({len(set(s[1] for s in samples))} identities)")
+        return samples
+
+    def _get_samples_flat(self, root_path: Path) -> list[tuple]:
+        """Parse samples from a flat image directory using filename regex.
+
+        This is the original parsing path for standard benchmarks (Market-1501,
+        DukeMTMC, MSMT17) where identity and camera IDs are encoded in filenames.
+
+        Args:
+            root_path (Path): Flat directory containing images.
+
+        Returns:
+            list[tuple]: List of (image_path, pid, camid) tuples.
+        """
         re_str = self.data.get("filename_re", "market1501")
         re_str = self.PATTERNS.get(re_str, re_str)  # resolve preset name or use as-is
         pattern = re.compile(re_str, re.IGNORECASE)
@@ -898,7 +1017,7 @@ class ReidDataset(ClassificationDataset):
                 continue
             try:
                 camid = int(match.group(2)) + cam_offset
-            except IndexError:
+            except (IndexError, ValueError):
                 camid = idx  # no camera group in regex — assign unique id per image
             samples.append((str(img_path), pid, camid))
         return samples

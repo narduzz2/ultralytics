@@ -880,7 +880,7 @@ class ReID(nn.Module):
         global_pool = (self.pool_avg(x) + self.pool_max(x)).flatten(1)  # (B, c_)
         global_emb = self.embed(self.drop(global_pool))  # (B, embed_dim)
 
-        if self.mgn_parts > 0:
+        if getattr(self, "mgn_parts", 0) > 0:
             # Multi-granularity: pool horizontal parts and average with global
             B, C, H, W = x.shape
             part_embs = [global_emb]
