@@ -7,11 +7,11 @@ from pathlib import Path
 from threading import Thread
 from urllib.request import Request, urlopen
 
+import torch
+
 from ultralytics import SETTINGS, __version__
 from ultralytics.utils import ARGV, ENVIRONMENT, GIT, IS_PIP_PACKAGE, ONLINE, PYTHON_VERSION, RANK, TESTS_RUNNING
 from ultralytics.utils.downloads import GITHUB_ASSETS_NAMES
-import torch
-
 from ultralytics.utils.torch_utils import get_cpu_info, get_gpu_info
 
 
