@@ -219,6 +219,7 @@ class DetectionValidator(BaseValidator):
         self.metrics.confusion_matrix = self.confusion_matrix
         self.metrics.save_dir = self.save_dir
 
+    @torch.inference_mode(False)
     def gather_stats(self) -> None:
         """Gather stats from all GPUs."""
         if RANK == 0:
