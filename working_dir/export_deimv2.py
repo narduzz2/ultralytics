@@ -1,7 +1,10 @@
 import argparse
 import re
+import types
 from copy import deepcopy
 from pathlib import Path
+
+import torch
 
 from ultralytics import RTDETRDEIM
 from ultralytics.engine.exporter import Exporter
@@ -41,8 +44,65 @@ def parse_args():
         "Without this flag, attention MatMul/Softmax and norm internals are "
         "forced to fp32 to avoid overflow (NVIDIA/TensorRT#4723).",
     )
+    p.add_argument(
+        "--ropefix",
+        action="store_true",
+        default=False,
+        help="Pre-compute DINOv3 RoPE sin/cos as constant buffers (default ON). "
+        "Required for onnxsim --simplify to succeed and removes one source of "
+        "FP16 instability (trig + division). See DEIMv2 export_onnx.py.",
+    )
     p.set_defaults(simplify=False)
     return p.parse_args()
+
+
+def apply_ropefix(deploy_model, imgsz):
+    """Replace DINOv3 RoPE forward with a constant lookup at the eval feature-map size.
+
+    Mirrors upstream DEIMv2 ``--ropefix`` (tools/deployment/export_onnx.py).
+    Collapses the per-block rope subgraph (arange/meshgrid/sub/sin/cos/div) into
+    two Constants in the exported ONNX, which:
+      - lets onnxsim --simplify succeed (otherwise crashes on Sub_1_output_0)
+      - removes a known fp16 instability source (trig + division)
+      - shrinks the graph TRT has to optimize → reduces Myelin tactic flakiness
+    """
+    # Path: deploy_model.model[0]  (DEIMDINOv3STAs wrapper)
+    #     .m                       (DINOv3STAs adapter)
+    #     .dinov3                  (DinoVisionTransformer or Windowed)
+    try:
+        backbone_wrapper = deploy_model.model[0]
+        sta_adapter = backbone_wrapper.m
+        dinov3 = sta_adapter.dinov3
+        rope = dinov3.rope_embed
+    except AttributeError as e:
+        print(f"[ropefix] no DINOv3 rope_embed found ({e}) — skipping")
+        return
+
+    # Refuse on windowed configs: rope is called with both windowed and global
+    # (Hw, Ww) vs (H, W); a single constant table would be wrong for one path.
+    from ultralytics.nn.backbones.dinov3 import WindowedDinoVisionTransformer
+    if isinstance(dinov3, WindowedDinoVisionTransformer):
+        print("[ropefix] WindowedDinoVisionTransformer detected — RoPE is called with "
+              "both windowed and global sizes; a single constant table would be wrong. "
+              "Skipping ropefix. Use --no-ropefix to silence.")
+        return
+
+    patch_size = dinov3.patch_embed.patch_size
+    if isinstance(patch_size, (list, tuple)):
+        patch_size = patch_size[0]
+    H = imgsz // patch_size
+    W = imgsz // patch_size
+    rope.eval()
+    with torch.no_grad():
+        sin, cos = rope(H=H, W=W)
+    rope.register_buffer("rope_sin_const", sin)
+    rope.register_buffer("rope_cos_const", cos)
+
+    def _const_forward(self, *, H=None, W=None):
+        return (self.rope_sin_const, self.rope_cos_const)
+
+    rope.forward = types.MethodType(_const_forward, rope)
+    print(f"[ropefix] precomputed RoPE at H={H}, W={W} (patch_size={patch_size})")
 
 
 def build_engine_fp16(onnx_path, engine_path, workspace=None, half=True, shape=(1, 3, 640, 640), fp32_attn=True):
@@ -89,15 +149,15 @@ def build_engine_fp16(onnx_path, engine_path, workspace=None, half=True, shape=(
             layer = network.get_layer(i)
             name = layer.name or ""
             pin = False
-            if layer.type == trt.LayerType.SOFTMAX:
-                pin = True
-            elif layer.type == trt.LayerType.NORMALIZATION:
-                pin = True
+            # if layer.type == trt.LayerType.SOFTMAX:
+            #     pin = True
+            # elif layer.type == trt.LayerType.NORMALIZATION:
+            #     pin = True
             # Uncomment this narrower score-matmul override if T4 still needs
             # extra stabilization without pinning every attention MatMul.
             # elif layer.type == trt.LayerType.MATRIX_MULTIPLY and attn_re.search(name):
             #     pin = True
-            elif norm_re.search(name) and layer.type == trt.LayerType.REDUCE:
+            if norm_re.search(name) and layer.type == trt.LayerType.REDUCE:
                 pin = True
             elif norm_re.search(name) and layer.type == trt.LayerType.UNARY and sqrt_re.search(name):
                 pin = True
@@ -124,7 +184,9 @@ def build_output_paths(args):
     """Build experiment-specific output paths to avoid clobbering previous exports."""
     weights_path = Path(args.weights)
     outdir = Path(args.outdir) if args.outdir else weights_path.parent
-    stem = Path(args.name).stem if args.name else f"{weights_path.stem}_op{args.opset}_{'sim' if args.simplify else 'nosim'}"
+    rope_tag = "rope" if args.ropefix else "norope"
+    sim_tag = "sim" if args.simplify else "nosim"
+    stem = Path(args.name).stem if args.name else f"{weights_path.stem}_op{args.opset}_{sim_tag}_{rope_tag}"
 
     # Keep the intermediate ONNX explicitly marked as FP32 for engine builds, since FP16 should be applied by TRT.
     onnx_precision = "fp16" if args.format == "onnx" and args.half else "fp32"
@@ -148,6 +210,9 @@ def main():
     for m in deploy_model.modules():
         if hasattr(m, "convert_to_deploy"):
             m.convert_to_deploy()
+
+    if args.ropefix:
+        apply_ropefix(deploy_model, args.imgsz)
 
     export_format = "onnx" if args.format == "engine" else args.format
     print(
