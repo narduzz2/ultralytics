@@ -750,10 +750,7 @@ class BaseTrainer:
                 LOGGER.info("Resuming training DistillationModel from checkpoint weights")
             student_model = self.get_model(cfg=cfg, weights=None, verbose=RANK in {-1, 0})
             student_model.args = self.args
-            model = DistillationModel(
-                student_model=student_model,
-                teacher_model=weights.teacher_model,
-            )
+            model = DistillationModel(student_model=student_model, teacher_model=weights.teacher_model)
             model.load_from_module(weights, strict=True)
             model.criterion = None
             self.model = model
@@ -822,7 +819,6 @@ class BaseTrainer:
     def set_model_attributes(self):
         """Set or update model parameters before training."""
         self.model.names = self.data["names"]
-        self.model.args = self.args
 
     def set_class_weights(self):
         """Compute and set class weights for handling class imbalance. Override in subclasses."""
