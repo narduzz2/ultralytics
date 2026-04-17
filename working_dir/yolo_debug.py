@@ -114,8 +114,13 @@ import torch
 # model.save("working_dir/dinov3_weights/rtdetr_dinov3sta_detrl3_640.pt")
 # model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3_v3_yoloaugp05_decay_68epc_obj2cocov2_epc24/weights/best.pt")
 # model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3_v3_yoloaugp05_decay_68epc_obj2cocov2_epc24/weights/best_op17_nosim_fp16_91new.engine")
-# model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3_v3_yoloaugp05_decay_68epc_obj2cocov2_epc24/weights/trt/best_fp16_attn32.engine")
-model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3plusSTA_xl_yoloaug_decay_58epc_p05_noaug4/weights/best_op17_nosim_norope_fp16.engine")
+# model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3_v3_yoloaugp05_decay_68epc_obj2cocov2_epc24/weights/best_op17_nosim_norope_fp16.engine")
+# model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3plusSTA_xl_yoloaug_decay_58epc_p05_noaug4/weights/best_op17_nosim_norope_fp16working.engine")
+model = RTDETRDEIM("/home/esat/workspace/runs/detect/detr_trainings/deim_dinov3plusSTA_xl_yoloaug_decay_58epc_p07_noaug4/weights/best_op17_nosim_norope_fp16.engine")
+# model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3baseSTA_xxl_yoloaug_decay_58epc_p07_noaug4/weights/best_op17_nosim_norope_fp16.engine")
+
+# model = RTDETRDEIM("/home/esat/workspace/deimv2_ultralytics/deimv2XL_coco_v2_op17_nosim_norope_fp16.engine")
+# model = RTDETRDEIM("/home/esat/workspace/deimv2_ultralytics/deimv2XXL_coco_op17_nosim_norope_fp16.engine")
 # model = RTDETR("yolo26_detr_l_obj_640.engine")
 
 # model = RTDETR("ultralytics/cfg/models/26/yolo26_rtdetr_dinov3s_l3_light_obj365.yaml")
@@ -147,10 +152,16 @@ model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3p
 
 # model = RTDETR("/Users/esat/workspace/pretrained/rtdetrLightp4_yolo26n_scratch_wu1_lr4x_origaugV2_150epc/weights/best.pt")
 
-# # Load COCO class names from the dataset config
-# coco_yaml = ROOT / "cfg/datasets/coco.yaml"
-# coco_names = YAML.load(coco_yaml).get("names")
-# model.model.names = coco_names  # Explicit destination names for class remap (no fallback).
+# Load COCO class names from the dataset config
+coco_yaml = ROOT / "cfg/datasets/coco.yaml"
+coco_names = YAML.load(coco_yaml).get("names")
+if hasattr(model.model, "names"):
+    # PyTorch checkpoints expose the underlying nn.Module, so names can be set directly.
+    model.model.names = coco_names
+else:
+    # Exported backends such as TensorRT keep model.model as a path string.
+    # Point the predictor at COCO yaml so AutoBackend can populate class names during setup.
+    model.overrides["data"] = str(coco_yaml)
 
 # Load Obj class names from the dataset config
 # obj365_names = YAML.load("working_dir/datasets/Objects365v1.yaml").get("names")
@@ -167,7 +178,7 @@ model = RTDETRDEIM("/data/esat/workspace/runs/detect/detr_trainings/deim_dinov3p
 # 2. Run inference on a source (can be a file path, URL, or '0' for webcam)
 # We use a standard URL image for this example.
 # model.set_head_attr(disable_topk=True)  # Disable top-k selection to get raw predictions for debugging
-results = model('https://ultralytics.com/images/bus.jpg', conf=0.30, imgsz=640)
+results = model('https://ultralytics.com/images/bus.jpg', conf=0.28, imgsz=640)
 
 # 3. Iterate through results (usually a list, one per image)
 for i, r in enumerate(results):
