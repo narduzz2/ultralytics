@@ -14,11 +14,14 @@ The tracker introduces two main components on top of the standard tracking-by-de
 
 from __future__ import annotations
 
+from functools import wraps
 from typing import Any
 
 import numpy as np
 import scipy.linalg
+import torch
 
+from ..utils import LOGGER
 from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
 from .utils import matching
@@ -269,6 +272,99 @@ def _iterative_associate(cost: np.ndarray, match_thr: float, reduce_step: float 
     u_tracks = [t for t in range(cost.shape[0]) if t not in m_tracks]
     u_dets = [d for d in range(cost.shape[1]) if d not in m_dets]
     return matches, u_tracks, u_dets
+
+
+def attach_raw_preds_hook(predictor) -> None:
+    """Wrap `predictor.postprocess` so raw (pre-NMS) predictions are captured for D_del.
+
+    TrackTrack needs access to the pre-NMS model output to run the looser secondary NMS pass
+    (paper Eq. 1). The generic tracking callback is kept TrackTrack-agnostic; the hook lives here.
+    Idempotent — if already wrapped, returns without re-wrapping.
+
+    Args:
+        predictor (BasePredictor): Predictor to instrument; `_raw_preds` and `_preproc_img_shape`
+            are populated on each postprocess call after wrapping.
+    """
+    if hasattr(predictor, "_orig_postprocess"):
+        return
+    orig = predictor.postprocess
+
+    @wraps(orig)
+    def _wrapped(preds, img, *args, **kwargs):
+        predictor._raw_preds = preds.clone() if isinstance(preds, torch.Tensor) else preds
+        predictor._preproc_img_shape = img.shape[2:]  # (H, W) of preprocessed image
+        return orig(preds, img, *args, **kwargs)
+
+    predictor._orig_postprocess = orig
+    predictor.postprocess = _wrapped
+
+
+def compute_dets_del(predictor) -> list | None:
+    """Compute TrackTrack's D_del set from the raw predictions captured by the postprocess hook.
+
+    D_del are high-confidence detections that the tight NMS suppressed but which survive a looser
+    NMS pass at IoU=0.95. TrackTrack then treats these as additional low-priority candidates
+    during association (paper Eq. 1).
+
+    Args:
+        predictor (BasePredictor): Predictor previously instrumented with `attach_raw_preds_hook`.
+
+    Returns:
+        (list[tuple | None] | None): Per-batch-element `(xywh, conf, cls)` bundles (or None where
+            no deleted detections were found). Returns None if raw preds were not captured.
+    """
+    raw_preds = getattr(predictor, "_raw_preds", None)
+    if raw_preds is None:
+        return None
+
+    from torchvision.ops import box_iou
+
+    from ultralytics.utils import nms, ops
+
+    is_obb = predictor.args.task == "obb"
+    preds_loose = nms.non_max_suppression(
+        raw_preds,
+        predictor.args.conf,
+        0.95,  # loose IoU; paper pairs tight 0.80 + loose 0.95
+        predictor.args.classes,
+        predictor.args.agnostic_nms,
+        max_det=predictor.args.max_det,
+        nc=0 if predictor.args.task == "detect" else len(predictor.model.names),
+        end2end=getattr(predictor.model, "end2end", False),
+        rotated=is_obb,
+    )
+
+    dets_del_list = []
+    im_shape = getattr(predictor, "_preproc_img_shape", None)
+    for loose, result in zip(preds_loose, predictor.results):
+        det_boxes = (result.obb if is_obb else result.boxes).cpu()
+        if len(loose) == 0 or len(det_boxes) == 0:
+            dets_del_list.append(None)
+            continue
+
+        loose_scaled = loose.clone()
+        if im_shape is not None:
+            loose_scaled[:, :4] = ops.scale_boxes(im_shape, loose_scaled[:, :4], result.orig_shape)
+
+        tight_xyxy = det_boxes.xyxy.cpu()
+        loose_xyxy = loose_scaled[:, :4].cpu()
+        if tight_xyxy.numel() == 0 or loose_xyxy.numel() == 0:
+            dets_del_list.append(None)
+            continue
+
+        ious = box_iou(loose_xyxy, tight_xyxy)
+        max_iou, _ = ious.max(dim=1)
+        del_mask = max_iou < 0.97
+        if not del_mask.any():
+            dets_del_list.append(None)
+            continue
+
+        del_boxes = loose_scaled[del_mask]
+        del_xywh = ops.xyxy2xywh(del_boxes[:, :4])
+        dets_del_list.append((del_xywh.numpy(), del_boxes[:, 4].numpy(), del_boxes[:, 5].numpy()))
+
+    predictor._raw_preds = None  # consumed
+    return dets_del_list
 
 
 def _track_aware_nms(tracks: list, dets: list, tai_thr: float, init_thr: float) -> list[bool]:
@@ -610,8 +706,6 @@ class TTSTrack(BaseTrack):
     def xywha(self) -> np.ndarray:
         """Get position in (center x, center y, width, height, angle) format; falls back to xywh if angle is missing."""
         if self.angle is None:
-            from ..utils import LOGGER
-
             LOGGER.warning("`angle` attr not found, returning `xywh` instead.")
             return self.xywh
         return np.concatenate([self.xywh, self.angle[None]])

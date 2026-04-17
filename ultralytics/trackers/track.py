@@ -1,6 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-from functools import partial, wraps
+from functools import partial
 from pathlib import Path
 
 import torch
@@ -10,81 +10,17 @@ from ultralytics.utils.checks import check_yaml
 
 from .bot_sort import BOTSORT
 from .byte_tracker import BYTETracker
-from .track_tracker import TRACKTRACK
+from .track_tracker import TRACKTRACK, attach_raw_preds_hook, compute_dets_del
 
-# A mapping of tracker types to corresponding tracker classes
+# Mapping of tracker_type config values to their tracker classes
 TRACKER_MAP = {"bytetrack": BYTETracker, "botsort": BOTSORT, "tracktrack": TRACKTRACK}
-
-
-def _compute_dets_del(predictor, raw_preds):
-    """Compute TrackTrack's D_del set from raw detector predictions.
-
-    D_del are high-confidence detections that were removed by the tight NMS but survive a looser
-    NMS pass. TrackTrack uses these as additional low-priority candidates during association (paper
-    Eq. 1).
-
-    Args:
-        predictor (object): Predictor instance exposing `args`, `results`, and the cached
-            `_preproc_img_shape`.
-        raw_preds (torch.Tensor): Raw predictions captured before NMS by the postprocess wrapper.
-
-    Returns:
-        (list[tuple | None]): Per-batch `(xywh, conf, cls)` bundles, or None when no deleted
-            detections are found for that batch element.
-    """
-    from torchvision.ops import box_iou
-
-    from ultralytics.utils import nms, ops
-
-    is_obb = predictor.args.task == "obb"
-    preds_loose = nms.non_max_suppression(
-        raw_preds,
-        predictor.args.conf,
-        0.95,  # loose IoU; paper uses 0.95 on top of the tight 0.80 pass
-        predictor.args.classes,
-        predictor.args.agnostic_nms,
-        max_det=predictor.args.max_det,
-        nc=0 if predictor.args.task == "detect" else len(predictor.model.names),
-        end2end=getattr(predictor.model, "end2end", False),
-        rotated=is_obb,
-    )
-
-    dets_del_list = []
-    im_shape = getattr(predictor, "_preproc_img_shape", None)
-    for loose, result in zip(preds_loose, predictor.results):
-        det_boxes = (result.obb if is_obb else result.boxes).cpu()
-        if len(loose) == 0 or len(det_boxes) == 0:
-            dets_del_list.append(None)
-            continue
-
-        # Scale the loose-NMS boxes from preprocessed space back to the original image
-        loose_scaled = loose.clone()
-        if im_shape is not None:
-            loose_scaled[:, :4] = ops.scale_boxes(im_shape, loose_scaled[:, :4], result.orig_shape)
-
-        tight_xyxy = det_boxes.xyxy.cpu()
-        loose_xyxy = loose_scaled[:, :4].cpu()
-        if tight_xyxy.numel() == 0 or loose_xyxy.numel() == 0:
-            dets_del_list.append(None)
-            continue
-
-        # A loose-NMS detection counts as D_del if it does not overlap any tight-NMS detection
-        ious = box_iou(loose_xyxy, tight_xyxy)
-        max_iou, _ = ious.max(dim=1)
-        del_mask = max_iou < 0.97
-        if not del_mask.any():
-            dets_del_list.append(None)
-            continue
-
-        del_boxes = loose_scaled[del_mask]
-        del_xywh = ops.xyxy2xywh(del_boxes[:, :4])
-        dets_del_list.append((del_xywh.numpy(), del_boxes[:, 4].numpy(), del_boxes[:, 5].numpy()))
-
-    return dets_del_list
 
 
 def on_predict_start(predictor: object, persist: bool = False) -> None:
     """Initialize trackers for object tracking during prediction.
+
+    Instantiates one tracker per stream, registers a ReID feature hook when appropriate, and for
+    TrackTrack attaches a postprocess hook that captures raw predictions needed by D_del.
 
     Args:
         predictor (ultralytics.engine.predictor.BasePredictor): The predictor object to initialize
@@ -110,9 +46,12 @@ def on_predict_start(predictor: object, persist: bool = False) -> None:
             f"Only 'bytetrack', 'botsort', and 'tracktrack' are supported for now, but got '{cfg.tracker_type}'"
         )
 
-    predictor._feats = None  # reset in case used earlier
+    predictor._feats = None  # reset ReID pre-hook state
     if hasattr(predictor, "_hook"):
         predictor._hook.remove()
+
+    # "auto" ReID reads backbone features via a forward pre-hook on the Detect layer. If the model
+    # doesn't expose the right head (end2end, non-standard), fall back to an external cls model.
     if cfg.tracker_type in {"botsort", "tracktrack"} and cfg.with_reid and cfg.model == "auto":
         from ultralytics.nn.modules.head import Detect
 
@@ -123,9 +62,9 @@ def on_predict_start(predictor: object, persist: bool = False) -> None:
         ):
             cfg.model = "yolo26n-cls.pt"
         else:
-            # Register hook to extract input of Detect layer
+
             def pre_hook(module, input):
-                predictor._feats = list(input[0])  # unroll to new list to avoid mutation in forward
+                predictor._feats = list(input[0])  # unroll to avoid mutation by forward
 
             predictor._hook = predictor.model.model.model[-1].register_forward_pre_hook(pre_hook)
 
@@ -133,27 +72,21 @@ def on_predict_start(predictor: object, persist: bool = False) -> None:
     for _ in range(predictor.dataset.bs):
         tracker = TRACKER_MAP[cfg.tracker_type](args=cfg, frame_rate=30)
         trackers.append(tracker)
-        if predictor.dataset.mode != "stream":  # only need one tracker for other modes
+        if predictor.dataset.mode != "stream":  # non-stream modes reuse a single tracker
             break
     predictor.trackers = trackers
-    predictor.vid_path = [None] * predictor.dataset.bs  # for determining when to reset tracker on new video
+    predictor.vid_path = [None] * predictor.dataset.bs  # used to reset the tracker when switching videos
 
-    # For TrackTrack: wrap postprocess to capture raw preds for D_del computation
-    if cfg.tracker_type == "tracktrack" and not hasattr(predictor, "_orig_postprocess"):
-        orig_postprocess = predictor.postprocess
-
-        @wraps(orig_postprocess)
-        def _postprocess_with_raw_preds(preds, img, *args, **kwargs):
-            predictor._raw_preds = preds.clone() if isinstance(preds, torch.Tensor) else preds
-            predictor._preproc_img_shape = img.shape[2:]  # (H, W) of the preprocessed image
-            return orig_postprocess(preds, img, *args, **kwargs)
-
-        predictor._orig_postprocess = orig_postprocess
-        predictor.postprocess = _postprocess_with_raw_preds
+    # TrackTrack needs access to the pre-NMS predictions to compute D_del
+    if cfg.tracker_type == "tracktrack":
+        attach_raw_preds_hook(predictor)
 
 
 def on_predict_postprocess_end(predictor: object, persist: bool = False) -> None:
     """Postprocess detected boxes and update with object tracking.
+
+    For TrackTrack this also computes the D_del set before calling the tracker. Results are
+    replaced in place with the tracked (re-indexed) subset.
 
     Args:
         predictor (object): The predictor object containing the predictions.
@@ -167,12 +100,10 @@ def on_predict_postprocess_end(predictor: object, persist: bool = False) -> None
     is_obb = predictor.args.task == "obb"
     is_stream = predictor.dataset.mode == "stream"
 
-    # Compute D_del for TrackTrack if raw preds are available
-    dets_del_list = None
-    raw_preds = getattr(predictor, "_raw_preds", None)
-    if raw_preds is not None and isinstance(predictor.trackers[0], TRACKTRACK):
-        dets_del_list = _compute_dets_del(predictor, raw_preds)
-        predictor._raw_preds = None  # clear
+    # TrackTrack-only: compute D_del once per frame for all batch elements
+    dets_del_list = (
+        compute_dets_del(predictor) if isinstance(predictor.trackers[0], TRACKTRACK) else None
+    )
 
     for i, result in enumerate(predictor.results):
         tracker = predictor.trackers[i if is_stream else 0]
