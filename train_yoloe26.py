@@ -258,6 +258,51 @@ DATA_CONFIG["old_enginecache"] = dict(
     )
 )
 
+DATA_CONFIG["old_enginecache"] = dict(
+    train=dict(
+        grounding_data=[
+            dict(
+                img_path="../datasets/Objects365v1/images/train",
+                json_file="../datasets/Objects365v1/annotations/objects365_train_segm.engine.cache",
+            ) ,
+            dict(
+                img_path="../datasets/flickr/full_images/",
+                json_file="../datasets/flickr/annotations/final_flickr_separateGT_train_segm.engine.cache"
+            ),
+            dict(
+                img_path="../datasets/mixed_grounding/gqa/images",
+                json_file="../datasets/mixed_grounding/annotations/final_mixed_train_no_coco_segm.engine.cache"
+            ),
+        ]
+    ),
+    val=dict(
+        yolo_data=["../datasets/lvis.yaml"]
+    )
+)
+
+DATA_CONFIG["old_engine1cache"] = dict(
+    train=dict(
+        grounding_data=[
+            dict(
+                img_path="../datasets/Objects365v1/images/train",
+                json_file="../datasets/Objects365v1/annotations/objects365_train_segm.engine1.cache",
+            ) ,
+            dict(
+                img_path="../datasets/flickr/full_images/",
+                json_file="../datasets/flickr/annotations/final_flickr_separateGT_train_segm.engine1.cache"
+            ),
+            dict(
+                img_path="../datasets/mixed_grounding/gqa/images",
+                json_file="../datasets/mixed_grounding/annotations/final_mixed_train_no_coco_segm.engine1.cache"
+            ),
+        ]
+    ),
+    val=dict(
+        yolo_data=["../datasets/lvis.yaml"]
+    )
+)
+
+
 
 
 import ultralytics,os
