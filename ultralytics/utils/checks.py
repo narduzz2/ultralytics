@@ -534,16 +534,6 @@ def check_tensorrt(min_version: str = "7.0.0"):
         check_requirements(f"tensorrt-cu{cuda_version}>={min_version},!=10.1.0")
 
 
-def check_tensorrt_rtx(min_version: str = "1.0.0"):
-    """Check and install TensorRT for RTX requirements.
-
-    TensorRT for RTX (`tensorrt_rtx`) is a lightweight runtime for RTX-class GPUs that produces
-    engines portable across RTX devices via runtime kernel compilation. It is a separate package
-    from classic TensorRT and is not interchangeable with it.
-    """
-    check_requirements(f"tensorrt_rtx>={min_version}")
-
-
 def check_torchvision():
     """Check the installed versions of PyTorch and Torchvision to ensure they're compatible.
 

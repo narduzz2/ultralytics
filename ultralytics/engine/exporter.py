@@ -943,12 +943,10 @@ class Exporter:
         assert not self.args.int8, "int8=True is not yet supported for format='engine_rtx' (FP32 only)"
         f_onnx = self.export_onnx()  # run before TRT-RTX import to isolate ONNX export failures
 
-        from ultralytics.utils.checks import check_tensorrt_rtx
-
         try:
             import tensorrt_rtx as trt_rtx
         except ImportError:
-            check_tensorrt_rtx()
+            check_requirements("tensorrt-rtx>=1.4.0")  # Linux/Windows x86_64 wheels only
             import tensorrt_rtx as trt_rtx
 
         from ultralytics.utils.export.engine_rtx import onnx2engine_rtx

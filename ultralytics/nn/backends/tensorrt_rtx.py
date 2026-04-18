@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from ultralytics.utils import LOGGER
-from ultralytics.utils.checks import check_tensorrt_rtx
+from ultralytics.utils.checks import check_requirements
 
 from .base import BaseBackend
 
@@ -30,7 +30,7 @@ class TensorRTRTXBackend(BaseBackend):
         try:
             import tensorrt_rtx as trt
         except ImportError:
-            check_tensorrt_rtx()
+            check_requirements("tensorrt-rtx>=1.4.0")  # Linux/Windows x86_64 wheels only
             import tensorrt_rtx as trt
 
         if self.device.type == "cpu":
@@ -49,11 +49,13 @@ class TensorRTRTXBackend(BaseBackend):
             engine = runtime.deserialize_cuda_engine(f.read())
             self.apply_metadata(metadata)
 
-        try:
-            self.context = engine.create_execution_context()
-        except Exception as e:
-            LOGGER.error("TensorRT-RTX engine created with an incompatible builder version\n")
-            raise e
+        if engine is None:
+            raise RuntimeError(
+                f"TensorRT-RTX failed to deserialize '{weight}' (tensorrt_rtx {trt.__version__}). "
+                "See TRT log above for the underlying error. Common causes: tensorrt_rtx version mismatch "
+                "between build host and target, unsupported target GPU architecture, or outdated NVIDIA driver."
+            )
+        self.context = engine.create_execution_context()
 
         self.bindings = OrderedDict()
         self.output_names = []
