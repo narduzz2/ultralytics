@@ -445,7 +445,7 @@ elif args.trainer == "YOLOEVPTrainer":
             #         f"{head_index}.{name}.1.norm",
             #         f"{head_index}.{name}.2.norm",
             #     ]  )
-            continue
+            freeze.append(f"{head_index}.{name}")
         else:
             freeze.append(f"{head_index}.{name}")
 
