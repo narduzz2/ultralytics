@@ -1911,13 +1911,6 @@ class SemanticSegmentfpn(nn.Module):
         # Lateral 1x1 convs to unify channels
         c_mid = ch[0]  # use P3 channel width as fusion dimension
 
-        # Upsample from stride-8 (P3) to stride-4
-        self.up_conv = nn.Sequential(
-            nn.ConvTranspose2d(c_mid, c_mid, kernel_size=2, stride=2, bias=False),
-            nn.BatchNorm2d(c_mid),
-            nn.SiLU(inplace=True),
-        )
-
         # Final classifier
         self.classifier = nn.Sequential(
             Conv(c_mid, c_mid, 3),
