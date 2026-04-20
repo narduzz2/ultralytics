@@ -20,7 +20,7 @@ from .conv import Conv, DWConv
 from .transformer import MLP, DeformableTransformerDecoder, DeformableTransformerDecoderLayer
 from .utils import bias_init_with_prob, linear_init
 
-__all__ = "Depth", "OBB", "Classify", "Detect", "Pose", "RTDETRDecoder", "Segment", "YOLOEDetect", "YOLOESegment", "v10Detect"
+__all__ = "Depth", "DINOv2DPTHead", "OBB", "Classify", "Detect", "Pose", "RTDETRDecoder", "Segment", "YOLOEDetect", "YOLOESegment", "v10Detect"
 
 
 class Detect(nn.Module):
@@ -837,6 +837,62 @@ class Depth(nn.Module):
         # Depth output (at P3 resolution → upsample 2x in head → P2 resolution = input/4)
         depth = self.head(out) * self.max_depth  # (B, 1, H/4, W/4) in meters
 
+        if self.training:
+            return {"depth": depth}
+        return depth
+
+
+class DINOv2DPTHead(nn.Module):
+    """Depth estimation head with DINOv2 ViT encoder + DPT decoder.
+
+    Replaces the YOLO conv backbone entirely. Reuses the DepthAnythingV2 architecture
+    from ultralytics.models.depth_anything.modules. Input images must be divisible by
+    14 (DINOv2 patch size). Encoder is initialized with DINOv2 self-supervised pretrained
+    weights; decoder is trained from scratch.
+
+    Attributes:
+        encoder_name (str): DINOv2 size ("vits", "vitb", or "vitl").
+        max_depth (float): Output scale for final depth prediction in meters.
+    """
+
+    def __init__(self, encoder_name: str = "vits", max_depth: float = 10.0,
+                 freeze_encoder: bool = False, pretrained: bool = True):
+        super().__init__()
+        from ultralytics.models.depth_anything.modules import DepthAnythingV2
+
+        self.encoder_name = encoder_name
+        self.max_depth = max_depth
+
+        self.model = DepthAnythingV2(encoder_name=encoder_name)
+        self.model.encoder.requires_grad_(True)
+
+        if pretrained:
+            encoder_ckpts = {
+                "vits": "dinov2_vits14",
+                "vitb": "dinov2_vitb14",
+                "vitl": "dinov2_vitl14",
+            }
+            hub_model = torch.hub.load("facebookresearch/dinov2", encoder_ckpts[encoder_name], pretrained=True)
+            self.model.encoder.load_state_dict(hub_model.state_dict(), strict=False)
+            del hub_model
+
+        if freeze_encoder:
+            for p in self.model.encoder.parameters():
+                p.requires_grad = False
+
+    def forward(self, x):
+        """RGB image → depth map in meters.
+
+        Args:
+            x: Input tensor (B, 3, H, W). H and W must be divisible by 14.
+
+        Returns:
+            Training: dict with "depth" key → (B, 1, H, W).
+            Inference: (B, 1, H, W).
+        """
+        depth = self.model(x)  # (B, H, W), non-negative via relu
+        depth = depth.unsqueeze(1)  # (B, 1, H, W)
+        depth = torch.sigmoid(depth) * self.max_depth
         if self.training:
             return {"depth": depth}
         return depth

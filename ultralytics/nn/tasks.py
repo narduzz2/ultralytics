@@ -45,6 +45,7 @@ from ultralytics.nn.modules import (
     Conv2,
     ConvTranspose,
     Depth,
+    DINOv2DPTHead,
     Detect,
     DWConv,
     DWConvTranspose2d,
@@ -1722,6 +1723,8 @@ def parse_model(d, ch, verbose=True):
                 m.legacy = legacy
         elif m is Depth:
             args.append([ch[x] for x in f])  # ch tuple
+        elif m is DINOv2DPTHead:
+            c2 = 1  # single-channel depth output
         elif m is v10Detect:
             args.append([ch[x] for x in f])
         elif m is ImagePoolingAttn:
@@ -1840,7 +1843,7 @@ def guess_model_task(model):
                 return "pose"
             elif isinstance(m, OBB):
                 return "obb"
-            elif isinstance(m, Depth):
+            elif isinstance(m, (Depth, DINOv2DPTHead)):
                 return "depth"
             elif isinstance(m, (Detect, WorldDetect, YOLOEDetect, v10Detect)):
                 return "detect"
