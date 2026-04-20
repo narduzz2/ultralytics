@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 
 # =============================================================================
-# SELECT BENCHMARK HERE: "m5", "m5_new", "m5_coreml", "xeon", "xeon_new", "t4", "t4_new", "jetson-agx-thor-gpu",
+# SELECT BENCHMARK HERE: "m5", "m5_new", "m5_coreml", "xeon", "xeon_new", "t4", "rf_compare", "t4_new", "jetson-agx-thor-gpu",
 # "jetson-agx-thor-cpu", "jetson-agx-orin-gpu", "jetson-agx-orin-cpu",
 # "jetson-orin-nano-super-gpu", or "jetson-orin-nano-super-cpu"
 # =============================================================================
@@ -334,6 +334,9 @@ BENCHMARKS = {
                 ("x", 17.2, {"ap": 58.6, "ap50": 77.5, "ap75": 64.0, "ap_small": 40.8, "ap_medium": 64.3, "ap_large": 76.3}),
                 ("xxl", 27.0, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
             ],
+            "YOLO26_RTDETR (obj365)": [
+                ("l", 8.1, {"ap": 56.6, "ap50": 74.1, "ap75": 61.7, "ap_small": 40.8, "ap_medium": 61.0, "ap_large": 71.5}),
+            ],
             "LW-DETR (obj365)": [
                 # LW-DETR obj365 results as reported in ECDet paper (arXiv 2603.18739), TRT v10.6
                 ("n", 2.0, {"ap": 42.6}),
@@ -343,11 +346,15 @@ BENCHMARKS = {
                 ("x", 18.4, {"ap": 58.3, "ap50": 76.9, "ap75": 63.3, "ap_small": 40.9, "ap_medium": 63.3, "ap_large": 74.8}),
             ],
             "DEIMv2 (Ultralytics)": [
-                ("l", 9.9, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
+                ("xl", 14.9, {"ap": 58.0, "ap50": 75.3, "ap75": 63.2, "ap_small": 39.6, "ap_medium": 63.3, "ap_large": 76.3}),
+                ("xxl", 32.9, {"ap": 59.8, "ap50": 77.1, "ap75": 65.3, "ap_small": 42.8, "ap_medium": 65.5, "ap_large": 77.1}),
             ],
-            "DEIMv2 (Ultralytics, obj365)": [
-                ("l", 9.9, {"ap": 57.8, "ap50": 75.0, "ap75": 63.1, "ap_small": 39.7, "ap_medium": 62.6, "ap_large": 75.8}),
-            ],
+            # "DEIMv2 (Ultralytics)": [
+            #     ("l", 9.9, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
+            # ],
+            # "DEIMv2 (Ultralytics, obj365)": [
+            #     ("l", 9.9, {"ap": 57.8, "ap50": 75.0, "ap75": 63.1, "ap_small": 39.7, "ap_medium": 62.6, "ap_large": 75.8}),
+            # ],
             # "DINOv3-RTDETR": [
             #     ("s", 4.3, {"ap": 50.3, "ap50": 69.0, "ap75": 54.4, "ap_small": 27.8, "ap_medium": 55.8, "ap_large": 72.5}),
             # ],
@@ -417,7 +424,7 @@ BENCHMARKS = {
 
         },
     },
-    "t4_deimv2": {
+    "rf_compare": {
         "title": "Object Detection Models: Latency vs mAP (Tesla T4 GPU, TensorRT v10.11)",
         "models": {
             "RF-DETR (obj365, TopK)": [
@@ -428,8 +435,15 @@ BENCHMARKS = {
                 ("x", 17.2, {"ap": 58.6, "ap50": 77.5, "ap75": 64.0, "ap_small": 40.8, "ap_medium": 64.3, "ap_large": 76.3}),
                 ("xxl", 27.0, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
             ],
-            "DEIMv2 (Ultralytics, obj365)": [
-                ("l", 9.9, {"ap": 57.8, "ap50": 75.0, "ap75": 63.1, "ap_small": 39.7, "ap_medium": 62.6, "ap_large": 75.8}),
+            # "DEIMv2 (Ultralytics, obj365)": [
+            #     ("l", 9.9, {"ap": 57.8, "ap50": 75.0, "ap75": 63.1, "ap_small": 39.7, "ap_medium": 62.6, "ap_large": 75.8}),
+            # ],
+            "DEIMv2 (Ultralytics)": [
+                ("xl", 14.9, {"ap": 58.0, "ap50": 75.3, "ap75": 63.2, "ap_small": 39.6, "ap_medium": 63.3, "ap_large": 76.3}),
+                ("xxl", 32.9, {"ap": 59.8, "ap50": 77.1, "ap75": 65.3, "ap_small": 42.8, "ap_medium": 65.5, "ap_large": 77.1}),
+            ],
+            "YOLO26_RTDETR (obj365)": [
+                ("l", 8.1, {"ap": 56.6, "ap50": 74.1, "ap75": 61.7, "ap_small": 40.8, "ap_medium": 61.0, "ap_large": 71.5}),
             ],
         },
     },
@@ -442,6 +456,7 @@ MODEL_STYLES = {
     "YOLO26 (NMS)": ("o", -12),
     "YOLO26-reported": ("o", -12),
     "YOLO26_RTDETR": ("^", -12),
+    "YOLO26_RTDETR (obj365)": ("^", 8),
     "DINOv3-RTDETR": ("X", 8),
     "DINOv3-RTDETR (obj365)": ("X", -12),
     "DINOv3-STA-RTDETR": ("X", -12),
@@ -546,6 +561,7 @@ def build_plot(output_path: Path, show: bool, metric: str) -> None:
     ax.grid(True, which="major", linestyle="--", linewidth=0.6, alpha=0.6)
 
     palette = plt.get_cmap("tab20")
+    # palette = plt.get_cmap("tab10")
     plotted = False
     for i, (model_name, data) in enumerate(models.items()):
         marker, label_offset = MODEL_STYLES.get(model_name, ("o", 8))
