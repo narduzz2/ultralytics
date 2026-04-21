@@ -21,21 +21,18 @@ class AFSSScheduler:
 
     Attributes:
         num_images (int): Total number of images in the dataset.
-        warmup_epochs (float): Number of warmup epochs before AFSS sampling activates.
         seed (int): Random seed for deterministic sampling.
         state (dict[int, dict]): Per-image state containing precision, recall, and last_seen_epoch.
     """
 
-    def __init__(self, num_images: int, warmup_epochs: float = 3.0, seed: int = 0):
+    def __init__(self, num_images: int, seed: int = 0):
         """Initialize AFSSScheduler with the given dataset size and warmup configuration.
 
         Args:
             num_images (int): Total number of images in the dataset.
-            warmup_epochs (float): Number of warmup epochs before AFSS sampling activates.
             seed (int): Random seed for deterministic sampling.
         """
         self.num_images = num_images
-        self.warmup_epochs = warmup_epochs
         self.seed = seed
         self.state = {i: {"precision": 0.0, "recall": 0.0, "last_seen_epoch": -1} for i in range(num_images)}
 
@@ -152,9 +149,7 @@ def afss_on_epoch_start(trainer):
         # Lazy init on first epoch
         dataset = _unwrap_dataset(trainer.train_loader.dataset)
 
-        trainer.afss_scheduler = AFSSScheduler(
-            len(dataset), warmup_epochs=trainer.args.warmup_epochs, seed=trainer.args.seed
-        )
+        trainer.afss_scheduler = AFSSScheduler(len(dataset), seed=trainer.args.seed)
         trainer.afss_current_indices = list(range(len(dataset)))
 
         # Resume: restore scheduler state if available
@@ -170,7 +165,7 @@ def afss_on_epoch_start(trainer):
                 )
 
     epoch = trainer.epoch
-    if epoch < trainer.afss_scheduler.warmup_epochs:
+    if epoch < trainer.args.warmup_epochs:  # do not use afss during warmup
         return
 
     selected_indices = trainer.afss_scheduler.sample_indices(epoch)
@@ -221,8 +216,7 @@ def afss_on_epoch_end(trainer):
         return
     epoch = trainer.epoch
     trainer.afss_scheduler.update_last_seen(trainer.afss_current_indices, epoch)
-    offset = math.ceil(trainer.afss_scheduler.warmup_epochs)
-    if epoch >= trainer.afss_scheduler.warmup_epochs and (epoch - offset) % 5 == 0:
+    if epoch >= trainer.args.warmup_epochs and (epoch - math.ceil(trainer.args.warmup_epochs)) % 5 == 0:
         afss_refresh_metrics(trainer)
 
 
