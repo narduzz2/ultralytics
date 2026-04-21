@@ -10,7 +10,7 @@ import torch
 from ultralytics.data.build import load_inference_source
 from ultralytics.engine.model import Model
 from ultralytics.models import yolo
-from ultralytics.nn.modules.head import AnomalyDetection
+from ultralytics.nn.modules.head import ADMBHead, AnomalyDetection
 from ultralytics.nn.tasks import (
     ClassificationModel,
     DetectionModel,
@@ -486,7 +486,9 @@ class YOLOAnomaly(Model):
         Initialize YOLOAnomaly from a pretrained model file.
 
         Loads the checkpoint and automatically upgrades the underlying YOLOEModel to
-        YOLOAnomalyModel to enable memory bank methods. Call setup() after initialization.
+        YOLOAnomalyModel to enable memory bank methods. If the loaded checkpoint was
+        previously saved with anomaly metadata (via save()), the model is restored
+        ready to predict without calling setup() or load_mb().
 
         Args:
             model (str | Path): Path to pretrained model (*.pt), e.g. 'yolo26s.pt'.
@@ -504,6 +506,9 @@ class YOLOAnomaly(Model):
                     f"YOLOAnomaly requires a DetectionModel or YOLOEModel checkpoint, "
                     f"but loaded {type(self.model).__name__}."
                 )
+
+        # Restore anomaly metadata from checkpoint if previously saved via save()
+        self._restore_anomaly_metadata()
 
     @property
     def task_map(self) -> dict[str, dict[str, Any]]:
@@ -721,6 +726,8 @@ class YOLOAnomaly(Model):
         ad_conf: float | None = None,
         ad_max_det: int | None = None,
         mode: str | None = None,
+        accumulate_thresh: float | None = None,
+        score_filter_kernel: int | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters and optionally switch mode.
 
@@ -728,11 +735,18 @@ class YOLOAnomaly(Model):
             ad_conf (float | None): Confidence threshold for anomaly proposals.
             ad_max_det (int | None): Maximum number of detections per image.
             mode (str | None): If provided, switch to this mode ('anomaly' or 'detect').
+            accumulate_thresh (float | None): Score threshold for OBMA memory-bank accumulation.
+            score_filter_kernel (int | None): Kernel size for spatial mean filter (1=off, 3/5/7=smoothing).
         """
         assert isinstance(self.model, YOLOAnomalyModel), "Call setup() before set_ad_params()."
         head = self.model.model[-1]
         assert isinstance(head, AnomalyDetection), "Call setup() before set_ad_params()."
-        head.set_ad_params(ad_conf=ad_conf, ad_max_det=ad_max_det)
+        head.set_ad_params(
+            ad_conf=ad_conf,
+            ad_max_det=ad_max_det,
+            accumulate_thresh=accumulate_thresh,
+            score_filter_kernel=score_filter_kernel,
+        )
         if mode is not None:
             self.set_mode(mode)
 
@@ -770,7 +784,8 @@ class YOLOAnomaly(Model):
         Run anomaly detection on the given source.
 
         Detections are regions whose anomaly score exceeds the configured threshold.
-        Ensure setup() and load_support_set() have been called beforehand.
+        Ensure setup() and load_support_set() have been called beforehand,
+        or load a previously saved anomaly model (.pt with embedded memory bank).
 
         Args:
             source: Image source for inference.
@@ -781,4 +796,121 @@ class YOLOAnomaly(Model):
             list[Results] | generator: Anomaly detection results.
         """
         return super().predict(source=source, stream=stream, **kwargs)
+
+    @property
+    def is_configured(self) -> bool:
+        """Check if the model is fully configured for anomaly detection (head + memory bank populated)."""
+        head = self.model.model[-1]
+        if not isinstance(head, AnomalyDetection) or head.adhead is None:
+            return False
+        # Check at least one head has real features (beyond the 10-entry padding from _memory_tensor)
+        for h in head.adhead:
+            if isinstance(h, ADMBHead) and h.memory_bank.numel() > 0 and h.memory_bank.shape[0] > 10:
+                return True
+        return False
+
+    def save(self, filename: str | Path = "saved_model.pt") -> None:
+        """Save the anomaly model with memory bank and metadata embedded in the checkpoint.
+
+        The saved .pt file can be loaded directly with ``YOLOAnomaly(path)`` and used
+        for prediction without calling ``setup()`` or ``load_mb()``.
+
+        Args:
+            filename (str | Path): Destination file path.
+        """
+        from copy import deepcopy
+        from datetime import datetime
+        from ultralytics import __version__
+
+        self._check_is_pytorch_model()
+
+        # Build anomaly metadata to persist alongside the model
+        head = self.model.model[-1]
+        anomaly_meta = {}
+        if isinstance(head, AnomalyDetection) and head.adhead is not None:
+            anomaly_meta = {
+                "anomaly_names": getattr(self.model, "_anomaly_names", dict(self.model.names)),
+                "original_names": getattr(self.model, "_original_names", {}),
+                "original_nc": getattr(self.model, "_original_nc", getattr(head, "original_nc", head.nc)),
+                "anomaly_mode": head.anomaly_mode,
+                "ad_conf": head.ad_conf,
+                "ad_max_det": head.ad_max_det,
+                "temperature": head.temperature,
+                "K": head.K,
+                "accumulate_thresh": head.accumulate_thresh,
+                "score_filter_kernel": head.score_filter_kernel,
+            }
+
+        updates = {
+            "model": deepcopy(self.model).half() if isinstance(self.model, torch.nn.Module) else self.model,
+            "date": datetime.now().isoformat(),
+            "version": __version__,
+            "license": "AGPL-3.0 License (https://ultralytics.com/license)",
+            "docs": "https://docs.ultralytics.com",
+            "anomaly_meta": anomaly_meta,
+        }
+        torch.save({**self.ckpt, **updates}, filename)
+
+    def _restore_anomaly_metadata(self) -> None:
+        """Restore anomaly detection state from checkpoint metadata if available.
+
+        Called automatically by __init__ when loading a previously saved anomaly model.
+        If the checkpoint contains anomaly_meta and the model head is already an
+        AnomalyDetection with populated adhead, the model is ready to predict immediately.
+        """
+        from ultralytics.utils import LOGGER
+
+        ckpt = self.ckpt
+        if not ckpt or not isinstance(ckpt, dict):
+            return
+
+        meta = ckpt.get("anomaly_meta")
+        head = self.model.model[-1]
+        is_ad_head = isinstance(head, AnomalyDetection) and head.adhead is not None
+
+        if not is_ad_head and meta is None:
+            return  # Fresh model, no anomaly state to restore
+
+        if is_ad_head:
+            # Model was saved with AnomalyDetection head — restore metadata
+            if meta:
+                self.model._anomaly_names = meta.get("anomaly_names", {0: "anomaly"})
+                self.model._original_names = meta.get("original_names", {})
+                self.model._original_nc = meta.get("original_nc", head.nc)
+                head.original_nc = self.model._original_nc
+                head.ad_conf = meta.get("ad_conf", 0.5)
+                head.ad_max_det = meta.get("ad_max_det", 9)
+                head.temperature = meta.get("temperature", 3.0)
+                head.K = meta.get("K", 15)
+                head.accumulate_thresh = meta.get("accumulate_thresh", 0.4)
+                head.score_filter_kernel = meta.get("score_filter_kernel", 1)
+
+                # Propagate params to ADMBHead sub-modules
+                for h in head.adhead:
+                    if isinstance(h, ADMBHead):
+                        h.temperature = head.temperature
+                        h.K = head.K
+                        h.accumulate_thresh = head.accumulate_thresh
+                        h.score_filter_kernel = head.score_filter_kernel
+
+                anomaly_mode = meta.get("anomaly_mode", True)
+                head.set_anomaly_mode(anomaly_mode)
+                if anomaly_mode:
+                    self.model.names = {0: list(self.model._anomaly_names.values())[0]}
+                else:
+                    self.model.names = self.model._original_names
+
+            # Freeze memory bank (loaded model should not accumulate)
+            self.model.freeze_memory_bank()
+
+            has_mb = any(
+                h.memory_bank.numel() > 0 and h.memory_bank.shape[0] > 10
+                for h in head.adhead if isinstance(h, ADMBHead)
+            )
+            if has_mb:
+                stats = self.model.get_memory_bank_stats()
+                LOGGER.info("YOLOAnomaly: restored anomaly model from checkpoint")
+                for i, s in enumerate(stats):
+                    LOGGER.info(f"  Head[{i}]: {s['size']} features, dim={s['feature_dim']}")
+
 

@@ -1805,7 +1805,7 @@ class ADMBHead(nn.Module):
     """
 
     def __init__(self, vocab: nn.Module, loc: nn.Module, temperature: float = 3.0,
-                 accumulate_thresh: float = 0.4,K=15) -> None:
+                 accumulate_thresh: float = 0.4, K=15, score_filter_kernel: int = 1) -> None:
         super().__init__()
         self.vocab_linear = self._conv2linear(vocab)
         self.loc = loc
@@ -1813,8 +1813,9 @@ class ADMBHead(nn.Module):
         self.feature_dim: int | None = None
         self.update = True
         self.temperature = temperature
-        self.K=K
+        self.K = K
         self.accumulate_thresh = accumulate_thresh
+        self.score_filter_kernel = score_filter_kernel
 
 
     # ── configuration ────────────────────────────────────────────────────────
@@ -1885,7 +1886,8 @@ class ADMBHead(nn.Module):
         # Noisy-OR (uniform weights): P(anomaly) = Π(1 - sim_i)^(1/k). This formula maps the top-k similarity scores to an overall anomaly probability. 
         score=(1 - topk_sim).clamp(min=1e-8)
         log_prob = (topk_sim.new_ones(1, k) / k * torch.log(score)).sum(dim=1)
-        prob= torch.exp(log_prob).clamp(0, 1)
+        prob= torch.exp(log_prob).clamp(0, 1) # [n*n]
+  
 
         return prob
 
@@ -1897,35 +1899,60 @@ class ADMBHead(nn.Module):
         H: int,
         W: int,
         accumulate_thresh: float,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Online Bootstrapped Memory Accumulation (OBMA).
+    ) -> torch.Tensor:
+        """Online Bootstrapped Memory Accumulation (OBMA) with sequential deduplication.
 
-        Selects positions above ``accumulate_thresh`` as high-confidence normal
-        samples, L2-normalises and appends their features to the memory bank
-        (only when ``self.update`` is True).  Decouples *what gets stored*
-        (``accumulate_thresh``) from *what gets detected* (``accumulate_thresh``).
+        For each image in the batch, candidate positions (initial anomaly score >
+        ``accumulate_thresh``) are processed one-by-one in descending novelty order.
+        After each accepted feature is added to the memory bank the bank is updated
+        immediately, so subsequent candidates from the **same image** are re-scored
+        against the already-updated bank.  This guarantees that no two features
+        contributed by the same image are mutually redundant.
 
         Returns:
-            mask:   bool [H*W] — positions selected for inference output.
-            logits: float [k]  — anomaly logits for masked positions;
-                                 sigmoid(logits) restores the anomaly probability.
+            keep: bool [H*W] — positions accepted from the first batch image.
         """
-        accumulate_mask = scores_hw > accumulate_thresh
-
-        keep = scores_hw > self.accumulate_thresh  # bootstrap selection mask
-        feats = cls_feat.permute(0, 2, 3, 1).reshape(-1, self.feature_dim)
-        normed = F.normalize(feats[keep.repeat(B)].detach(), p=2, dim=1)
         mem = self._memory_tensor()
-        self.memory_bank = torch.cat((mem, normed.to(mem.device, dtype=mem.dtype)), dim=0)
+        total_added = 0
+        keep_flags = torch.zeros(H * W, dtype=torch.bool, device=cls_feat.device)
+
+        for b in range(B):
+            # Normalize features for this image: [H*W, C]
+            feats_b = cls_feat[b].permute(1, 2, 0).reshape(H * W, self.feature_dim).detach()
+            normed_b = F.normalize(feats_b, p=2, dim=1)
+
+            # Initial scoring to obtain the candidate pool
+            init_scores = self._anomaly_scores(normed_b, mem=mem)  # [H*W]
+            candidate_idx = (init_scores > accumulate_thresh).nonzero(as_tuple=True)[0]
+            if candidate_idx.numel() == 0:
+                continue
+
+            # Process most-novel candidates first
+            sort_order = init_scores[candidate_idx].argsort(descending=True)
+            candidate_idx = candidate_idx[sort_order]
+            cand_feats = normed_b[candidate_idx]  # [K, C]
+
+            added_this_image = 0
+            for i in range(cand_feats.shape[0]):
+                feat = cand_feats[i : i + 1]  # [1, C]
+                # Re-score against the live bank (includes features added this image)
+                score = self._anomaly_scores(feat, mem=mem).item()
+                if score > accumulate_thresh:
+                    mem = torch.cat((mem, feat.to(mem.device, dtype=mem.dtype)), dim=0)
+                    added_this_image += 1
+                    if b == 0:
+                        keep_flags[candidate_idx[i]] = True
+
+            total_added += added_this_image
+
+        self.memory_bank = mem
         LOGGER.info(
-            "OBMA: added=%d/%d keep=%.1f%% infer=%.1f%% mem_size=%d",
-            normed.shape[0], B * H * W,
-            100.0 * keep.sum() / max(H * W, 1),
-            100.0 * accumulate_mask.sum() / max(H * W, 1),
+            "OBMA: added=%d/%d keep=%.1f%% mem_size=%d",
+            total_added, B * H * W,
+            100.0 * keep_flags.sum() / max(H * W, 1),
             self.memory_bank.shape[0],
         )
-
-        return accumulate_mask
+        return keep_flags
 
     # ── forward ───────────────────────────────────────────────────────────────
 
@@ -1946,7 +1973,12 @@ class ADMBHead(nn.Module):
         """
         B, C, H, W = cls_feat.shape
         if self.feature_dim is None:
-            self.feature_dim=C
+            self.feature_dim = C
+
+        # spatial mean filter on feature map to suppress isolated-pixel noise before scoring
+        if self.score_filter_kernel > 1:
+            pad = self.score_filter_kernel // 2
+            cls_feat = F.avg_pool2d(cls_feat, kernel_size=self.score_filter_kernel, stride=1, padding=pad)
 
         # compute anomaly score
         scores_hw = self._anomaly_scores(cls_feat, mem=self._memory_tensor()).view(B, -1).max(dim=0).values  # [H*W]
@@ -1984,28 +2016,34 @@ class AnomalyDetection(Detect):
     is_fused = False
     _fixed_nc=None
     def __init__(
-        self, nc: int = 80, reg_max=16, end2end=False, ch: tuple = ()
+        self, nc: int = 80, embed: int = 512, with_bn: bool = True, reg_max=16, end2end=False, ch: tuple = ()
     ):
         """
-        Initialize YOLO detection layer with nc classes and layer channels ch.
+        Initialize Anomaly Detection head with nc classes and layer channels ch.
 
         Args:
             nc (int): Number of classes.
-            embed (int): Embedding dimension.
-            with_bn (bool): Whether to use batch normalization in contrastive head.
+            embed (int): Embedding dimension (kept for YAML compatibility with YOLOEDetect).
+            with_bn (bool): Batch normalization flag (kept for YAML compatibility).
+            reg_max (int): DFL bins.
+            end2end (bool): Whether to use end-to-end mode.
             ch (tuple): Tuple of channel sizes from backbone feature maps.
         """
         super().__init__(nc, reg_max, end2end, ch)
         self.adhead = None  # Anomaly detection head will be built separately with build_adhead()
 
-        self.accumulate_thresh=0.4 # score threshold for memory-bank accumulation during update; see ADMBHead.set_accumulate_thresh()
-        self.temperature=3.0 # Noisy-OR temperature exponent; see ADMBHead._anomaly_scores()
-        self.K=15 # number of top-k most similar features to consider in anomaly scoring; see ADMBHead._anomaly_scores()
-        
-        self.ad_conf = 0.5 # confidence threshold for anomaly proposals during inference; see ADMBHead.forward()
-        self.ad_max_det = 9 # maximum number of detections per image during inference; see ADMBHead.forward()
-        self.anomaly_mode = True # whether to output single-channel anomaly logits (True) or nc-class vocabulary scores (False); see ADMBHead.forward()
-        super().__init__(nc, reg_max, end2end, ch)
+        self.accumulate_thresh = 0.4  # score threshold for memory-bank accumulation during update; see ADMBHead._online_bootstrapped_memory_accumulation()
+        self.temperature = 3.0         # Noisy-OR temperature exponent; see ADMBHead._anomaly_scores()
+        self.K = 15                    # number of top-k most similar features to consider in anomaly scoring; see ADMBHead._anomaly_scores()
+        self.score_filter_kernel = 1   # kernel size for spatial mean filter on score map (1 = disabled, 3/5/7 = smoothing)
+
+        self.ad_conf = 0.5      # confidence threshold for anomaly proposals during inference; see ADMBHead.forward()
+        self.ad_max_det = 9     # maximum number of detections per image during inference; see ADMBHead.forward()
+        self.anomaly_mode = True  # whether to output single-channel anomaly logits (True) or nc-class vocabulary scores (False); see ADMBHead.forward()
+
+        # Auto-build ADMBHead sub-modules when constructed from YAML (not from from_detect_head)
+        if ch:
+            self.build_adhead()
 
     @classmethod
     def from_detect_head(cls, head: "Detect") -> "AnomalyDetection":
@@ -2058,6 +2096,7 @@ class AnomalyDetection(Detect):
         new.accumulate_thresh = getattr(head, "accumulate_thresh", 0.4)
         new.temperature = getattr(head, "temperature", 3.0)
         new.K = getattr(head, "K", 15)
+        new.score_filter_kernel = getattr(head, "score_filter_kernel", 1)
         new.anomaly_mode = getattr(head, "anomaly_mode", True)
         return new
 
@@ -2102,11 +2141,20 @@ class AnomalyDetection(Detect):
 
         self.adhead = nn.ModuleList(
             ADMBHead(vocab=saved_vocab[i], loc=saved_loc[i],
-                     accumulate_thresh=self.accumulate_thresh, 
+                     accumulate_thresh=self.accumulate_thresh,
                      temperature=self.temperature,
-                     K=self.K)
+                     K=self.K,
+                     score_filter_kernel=self.score_filter_kernel)
             for i in range(self.nl)
         )
+        # Pre-fill memory banks with zeros so forward() never hits an empty-bank edge case
+        # (e.g. during stride computation in DetectionModel.__init__).
+        for h in self.adhead:
+            h._memory_tensor()
+
+    def bias_init(self):
+        """No-op: ADMBHead manages its own scoring; standard Detect bias init does not apply."""
+        pass
 
     def set_anomaly_mode(self, anomaly_mode: bool) -> None:
         """Switch between anomaly scoring (nc=1) and original classification (nc=original_nc).
@@ -2121,19 +2169,36 @@ class AnomalyDetection(Detect):
             h.anomaly_mode = anomaly_mode
 
 
-    def set_ad_params(self, ad_conf: float | None = None, ad_max_det: int | None = None) -> None:
+    def set_ad_params(
+        self,
+        ad_conf: float | None = None,
+        ad_max_det: int | None = None,
+        accumulate_thresh: float | None = None,
+        score_filter_kernel: int | None = None,
+    ) -> None:
         """Set anomaly-detection inference parameters.
 
         Args:
             ad_conf (float | None): Confidence threshold for anomaly proposals.
-                                    Defaults to 0.5 when not provided.
             ad_max_det (int | None): Maximum number of detections per image.
-                                     Defaults to 15 when not provided.
+            accumulate_thresh (float | None): Score threshold for OBMA memory-bank accumulation.
+            score_filter_kernel (int | None): Kernel size for spatial mean filter on score map.
+                                              1 = disabled, 3/5/7 = increasing smoothing.
         """
         if ad_conf is not None:
             self.ad_conf = ad_conf
         if ad_max_det is not None:
             self.ad_max_det = ad_max_det
+        if accumulate_thresh is not None:
+            self.accumulate_thresh = accumulate_thresh
+            if self.adhead is not None:
+                for h in self.adhead:
+                    h.accumulate_thresh = accumulate_thresh
+        if score_filter_kernel is not None:
+            self.score_filter_kernel = score_filter_kernel
+            if self.adhead is not None:
+                for h in self.adhead:
+                    h.score_filter_kernel = score_filter_kernel
 
 
     def _get_decode_boxes(self, x):
@@ -2148,6 +2213,8 @@ class AnomalyDetection(Detect):
 
         Sparse filtered output via memory-bank cosine-similarity scoring.
         End2end models apply postprocess (top-k); non-end2end uses predictor NMS.
+        Memory bank is pre-filled with zeros by build_adhead(), so this works
+        even during stride computation in DetectionModel.__init__.
         """
         assert self.adhead is not None, "Call build_adhead() before forward()."
 
@@ -2159,10 +2226,12 @@ class AnomalyDetection(Detect):
         for i in range(self.nl):
             cls_feat = cv3[i](x[i])
             loc_feat = cv2[i](x[i])
+            ad_conf=self.ad_conf
+            # ad_conf=[0.3,1,1]
             box, score, idx = self.adhead[i](
                 cls_feat,
                 loc_feat,
-                self.ad_conf,
+                ad_conf,
                 self.anomaly_mode
             )
             boxes.append(box.view(bs, self.reg_max * 4, -1))
@@ -2170,7 +2239,7 @@ class AnomalyDetection(Detect):
             index.append(idx)
 
         preds = dict(boxes=torch.cat(boxes, 2), scores=torch.cat(scores, 2), feats=x, index=torch.cat(index))
-        self.nc = preds["scores"].shape[1] # Update number of classes based on scores
+        self.nc = preds["scores"].shape[1]
         y = self._inference(preds)
         if self.end2end:
             y = self.postprocess(y.permute(0, 2, 1))
