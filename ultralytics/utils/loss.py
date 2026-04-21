@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import os
 from typing import Any
 
 import torch
@@ -1001,8 +1000,6 @@ class ReIDLoss:
         self.center_momentum = center_momentum
         self.focal_gamma = focal_gamma
         self.supcon_temp = supcon_temp
-        self.circle_gamma = float(os.environ.get("EXP_CIRCLE_GAMMA", "0"))  # Circle loss scale (0=disabled)
-        self.circle_margin = float(os.environ.get("EXP_CIRCLE_MARGIN", "0.25"))
         self.centers = None  # lazily initialized (nc, feat_dim)
 
     def __call__(self, preds, batch):
@@ -1032,9 +1029,7 @@ class ReIDLoss:
             ce_loss = F.cross_entropy(cls_logits, labels, label_smoothing=self.label_smooth)
 
         # Metric loss on raw features (before BNNeck)
-        if self.circle_gamma > 0:
-            tri_loss = self._circle_loss(raw_feat, labels)
-        elif self.supcon_temp > 0:
+        if self.supcon_temp > 0:
             tri_loss = self._supcon_loss(raw_feat, labels, self.supcon_temp)
         else:
             tri_loss = self._batch_hard_triplet_loss(raw_feat, labels)
@@ -1120,53 +1115,6 @@ class ReIDLoss:
 
         triplet_loss = F.relu(hardest_pos[valid] - hardest_neg[valid] + self.triplet_margin)
         return triplet_loss.mean()
-
-    def _circle_loss(self, features, labels):
-        """Circle Loss (Sun et al., CVPR 2020) — adaptive re-weighting of similarity scores.
-
-        Args:
-            features (torch.Tensor): Feature vectors (B, D).
-            labels (torch.Tensor): Identity labels (B,).
-
-        Returns:
-            (torch.Tensor): Circle loss scalar.
-        """
-        features = F.normalize(features, dim=1)
-        sim = features @ features.t()  # (B, B) cosine similarity in [-1, 1]
-        B = features.shape[0]
-
-        same_id = labels.unsqueeze(0) == labels.unsqueeze(1)
-        self_mask = ~torch.eye(B, dtype=torch.bool, device=features.device)
-        pos_mask = same_id & self_mask
-        neg_mask = ~same_id & self_mask
-
-        m = self.circle_margin
-        gamma = self.circle_gamma
-
-        # Adaptive weights: alpha_p = max(0, 1+m - s_p), alpha_n = max(0, s_n + m)
-        # Optimal thresholds: delta_p = 1-m, delta_n = m
-        alpha_p = torch.clamp(1 + m - sim.detach(), min=0)
-        alpha_n = torch.clamp(sim.detach() + m, min=0)
-
-        # Logits
-        logit_p = -gamma * alpha_p * (sim - (1 - m))  # negative for positive pairs
-        logit_n = gamma * alpha_n * (sim - m)  # positive for negative pairs
-
-        # Mask out invalid pairs with large negative values
-        logit_p = logit_p.masked_fill(~pos_mask, -1e9)
-        logit_n = logit_n.masked_fill(~neg_mask, -1e9)
-
-        # Circle loss = log(1 + sum_pos(exp(logit_p)) * sum_neg(exp(logit_n)))
-        # Use logsumexp for numerical stability
-        lse_p = torch.logsumexp(logit_p, dim=1)  # (B,)
-        lse_n = torch.logsumexp(logit_n, dim=1)  # (B,)
-        loss = F.softplus(lse_p + lse_n)
-
-        # Only count anchors with both pos and neg pairs
-        valid = pos_mask.any(dim=1) & neg_mask.any(dim=1)
-        if valid.sum() == 0:
-            return torch.tensor(0.0, device=features.device, requires_grad=True)
-        return loss[valid].mean()
 
     def _supcon_loss(self, features, labels, temperature=0.1):
         """Supervised contrastive loss (Khosla et al., 2020).

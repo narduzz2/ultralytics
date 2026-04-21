@@ -854,8 +854,6 @@ class ReID(nn.Module):
             g (int): Groups.
         """
         super().__init__()
-        import os
-
         c_ = 1280  # intermediate channels (same as Classify)
         self.conv = Conv(c1, c_, k, s, p, g)
         self.pool_avg = nn.AdaptiveAvgPool2d(1)
@@ -867,36 +865,12 @@ class ReID(nn.Module):
         self.classifier = nn.Linear(embed_dim, c2, bias=False)
         self.embed_dim = embed_dim
 
-        # MGN-style multi-granularity: average global + part embeddings
-        self.mgn_parts = int(os.environ.get("EXP_MGN_PARTS", "0"))  # 0=disabled, 2=2-part, 23=2+3-part
-
     def forward(self, x: list[torch.Tensor] | torch.Tensor) -> torch.Tensor | tuple:
         """Perform forward pass of the ReID head."""
         if isinstance(x, list):
             x = torch.cat(x, 1)
         x = self.conv(x)
-
-        # Global embedding (standard avg+max pooling)
-        global_pool = (self.pool_avg(x) + self.pool_max(x)).flatten(1)  # (B, c_)
-        global_emb = self.embed(self.drop(global_pool))  # (B, embed_dim)
-
-        if getattr(self, "mgn_parts", 0) > 0:
-            # Multi-granularity: pool horizontal parts and average with global
-            B, C, H, W = x.shape
-            part_embs = [global_emb]
-            part_sets = [2] if self.mgn_parts == 2 else [2, 3] if self.mgn_parts == 23 else [self.mgn_parts]
-            for n in part_sets:
-                stripe_h = H // n
-                for i in range(n):
-                    start_h = i * stripe_h
-                    end_h = (i + 1) * stripe_h if i < n - 1 else H
-                    part = x[:, :, start_h:end_h, :]
-                    part_pool = self.pool_avg(part).flatten(1)  # (B, c_)
-                    part_embs.append(self.embed(part_pool))  # reuse same embed layer
-            feat = torch.stack(part_embs, dim=0).mean(dim=0)  # (B, embed_dim)
-        else:
-            feat = global_emb
-
+        feat = self.embed(self.drop((self.pool_avg(x) + self.pool_max(x)).flatten(1)))  # avg+max pooling
         feat_bn = self.bottleneck(feat)  # BNNeck feature
         if self.training:
             cls_logits = self.classifier(feat_bn)
