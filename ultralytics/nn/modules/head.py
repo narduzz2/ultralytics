@@ -1994,8 +1994,14 @@ class ADMBHead(nn.Module):
             pad = self.score_filter_kernel // 2
             cls_feat = F.avg_pool2d(cls_feat, kernel_size=self.score_filter_kernel, stride=1, padding=pad)
 
-        # compute anomaly score
-        scores_hw = self._anomaly_scores(cls_feat, mem=self._memory_tensor()).view(B, -1).max(dim=0).values  # [H*W]
+        # compute per-image anomaly scores: [B, H*W]
+        scores_per_image = self._anomaly_scores(cls_feat, mem=self._memory_tensor()).view(B, -1)
+
+        # The shared mask (union across batch) determines WHICH positions are candidates.
+        # Using max(dim=0) means: flag a position if ANY image in the batch scores it high.
+        # Each image then gets its OWN score at those positions so normal images are not
+        # falsely assigned the high score of an anomalous batch-mate.
+        scores_hw = scores_per_image.max(dim=0).values  # [H*W] — for mask only
 
         # accumulate high-confidence normal features into the memory bank (only when self.update is True)
         if self.update:
@@ -2005,12 +2011,13 @@ class ADMBHead(nn.Module):
                                                                                self.accumulate_thresh)
 
         # infer flow
-        mask= scores_hw> conf
+        mask = scores_hw > conf                                          # [H*W]
         if anomaly_mode:
-            # Convert anomaly probability p -> logit space so downstream sigmoid(logits) = p
-            logits = torch.log((scores_hw[mask].clamp(1e-6, 1 - 1e-6)) /
-                            (1 - scores_hw[mask].clamp(1e-6, 1 - 1e-6)))
-            cls_scores = logits.view(1, 1, -1).expand(B, 1, -1)                      # [B, 1, k]
+            # Per-image logits: each image uses its own anomaly probability at the selected
+            # positions, NOT the shared batch-max score. This prevents a single anomalous
+            # image from contaminating normal images in the same batch with its high scores.
+            per_img_scores = scores_per_image[:, mask].clamp(1e-6, 1 - 1e-6)   # [B, k]
+            cls_scores = torch.log(per_img_scores / (1 - per_img_scores)).unsqueeze(1)  # [B, 1, k]
         else:
             cls_flat = cls_feat.flatten(2).transpose(-1, -2)                          # [B, H*W, C]
             cls_scores = self.vocab_linear(cls_flat[:, mask]).transpose(-1, -2)       # [B, nc, k]
