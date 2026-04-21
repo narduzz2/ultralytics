@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import math
+
+import cv2
+import numpy as np
 import torch
 
+from ultralytics.data.augment import LetterBox
 from ultralytics.engine.predictor import BasePredictor
 from ultralytics.engine.results import Results
 from ultralytics.utils import DEFAULT_CFG
@@ -32,6 +37,29 @@ class SemanticPredictor(BasePredictor):
         """
         super().__init__(cfg, overrides, _callbacks)
         self.args.task = "semantic"
+
+    def pre_transform(self, im: list[np.ndarray]) -> list[np.ndarray]:
+        """Short-side scale to imgsz and pad to stride multiples."""
+        imgsz = self.imgsz[0] if isinstance(self.imgsz, (list, tuple)) else self.imgsz
+        stride_t = self.model.stride
+        stride = int(stride_t.max() if hasattr(stride_t, "max") else stride_t)
+
+        scaled = []
+        for x in im:
+            h0, w0 = x.shape[:2]
+            r = imgsz / min(h0, w0)
+            if r != 1:
+                if h0 < w0:
+                    h, w = imgsz, math.ceil(w0 * r)
+                else:
+                    h, w = math.ceil(h0 * r), imgsz
+                x = cv2.resize(x, (w, h), interpolation=cv2.INTER_LINEAR)
+            scaled.append(x)
+
+        rect_h = math.ceil(max(x.shape[0] for x in scaled) / stride) * stride
+        rect_w = math.ceil(max(x.shape[1] for x in scaled) / stride) * stride
+        letterbox = LetterBox(auto=False, scaleup=False, center=False, stride=stride)
+        return [letterbox({"rect_shape": (rect_h, rect_w)}, image=x) for x in scaled]
 
     def postprocess(self, preds, img, orig_imgs):
         """Convert model logits to semantic segmentation results.
