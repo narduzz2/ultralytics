@@ -56,7 +56,7 @@ class SemanticTrainer(BaseTrainer):
         Returns:
             (SemanticDataset): Semantic segmentation dataset.
         """
-        use_rect = mode == "val" and self.args.rect
+        use_rect = mode == "val"
         return SemanticDataset(
             img_path=img_path,
             imgsz=self.args.imgsz,
