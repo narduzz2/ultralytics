@@ -78,16 +78,16 @@ The `dx_com` compiler package will be automatically installed from the DeepX SDK
 
 ### Export Arguments
 
-| Argument   | Type             | Default          | Description                                                                                                                             |
-| :--------- | :--------------- | :--------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
-| `format`   | `str`            | `'deepx'`        | Target format for the exported model, defining compatibility with DeepX NPU hardware.                                                   |
-| `imgsz`    | `int` or `tuple` | `640`            | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.       |
-| `batch`    | `int`            | `1`              | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode. |
-| `int8`     | `bool`           | `True`           | Enables INT8 quantization. Required for DeepX export — automatically set to `True` if not specified.                                    |
-| `data`     | `str`            | `'coco128.yaml'` | Dataset configuration file used for INT8 calibration. Specifies the calibration image source.                                           |
-| `fraction` | `float`          | `1.0`            | Fraction of the calibration dataset to use. Reduce to speed up export; 100–400 images are typically sufficient for good accuracy.       |
-| `device`   | `str`            | `None`           | Specifies the device for exporting: GPU (`device=0`) or CPU (`device=cpu`).                                                             |
-| `opt_level` | `int`           | `0`              | Optimization level for the DeepX compiler (`0` or `1`). Higher levels reduce inference latency but increase compilation time.           |
+| Argument    | Type             | Default          | Description                                                                                                                             |
+| :---------- | :--------------- | :--------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| `format`    | `str`            | `'deepx'`        | Target format for the exported model, defining compatibility with DeepX NPU hardware.                                                   |
+| `imgsz`     | `int` or `tuple` | `640`            | Desired image size for the model input. Can be an integer for square images or a tuple `(height, width)` for specific dimensions.       |
+| `batch`     | `int`            | `1`              | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode. |
+| `int8`      | `bool`           | `True`           | Enables INT8 quantization. Required for DeepX export — automatically set to `True` if not specified.                                    |
+| `data`      | `str`            | `'coco128.yaml'` | Dataset configuration file used for INT8 calibration. Specifies the calibration image source.                                           |
+| `fraction`  | `float`          | `1.0`            | Fraction of the calibration dataset to use. Reduce to speed up export; 100–400 images are typically sufficient for good accuracy.       |
+| `device`    | `str`            | `None`           | Specifies the device for exporting: GPU (`device=0`) or CPU (`device=cpu`).                                                             |
+| `opt_level` | `int`            | `0`              | Optimization level for the DeepX compiler (`0` or `1`). Higher levels reduce inference latency but increase compilation time.           |
 
 !!! tip
 
