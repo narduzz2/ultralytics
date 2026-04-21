@@ -162,42 +162,6 @@ The Ultralytics team benchmarked YOLO26 across various model formats and [precis
 
     - All models on systems except Intel Panther Lake family are run with `end2end=False`.
 
-
-### Intel Core CPU
-
-The Intel® Core® series is a range of high-performance processors by Intel. The lineup includes Core i3 (entry-level), Core i5 (mid-range), Core i7 (high-end), and Core i9 (extreme performance). Each series caters to different computing needs and budgets, from everyday tasks to demanding professional workloads. With each new generation, improvements are made to performance, energy efficiency, and features.
-
-Benchmarks below run on 12th Gen Intel® Core® i9-12900KS CPU at FP32 precision.
-
-<div align="center">
-<img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-corei9.avif" alt="OpenVINO YOLO inference benchmarks on Intel CPU">
-</div>
-
-??? abstract "Detailed Benchmark Results"
-
-    | Model   | Format      | Status | Size (MB) | metrics/mAP50-95(B) | Inference time (ms/im) |
-    | ------- | ----------- | ------ | --------- | ------------------- | ---------------------- |
-    | YOLO11n | PyTorch     | ✅     | 5.4       | 0.5071              | 21.00                  |
-    | YOLO11n | TorchScript | ✅     | 10.5      | 0.5077              | 21.39                  |
-    | YOLO11n | ONNX        | ✅     | 10.2      | 0.5077              | 15.55                  |
-    | YOLO11n | OpenVINO    | ✅     | 10.4      | 0.5077              | 11.49                  |
-    | YOLO11s | PyTorch     | ✅     | 18.4      | 0.5770              | 43.16                  |
-    | YOLO11s | TorchScript | ✅     | 36.6      | 0.5781              | 50.06                  |
-    | YOLO11s | ONNX        | ✅     | 36.3      | 0.5781              | 31.53                  |
-    | YOLO11s | OpenVINO    | ✅     | 36.4      | 0.5781              | 30.82                  |
-    | YOLO11m | PyTorch     | ✅     | 38.8      | 0.6257              | 110.60                 |
-    | YOLO11m | TorchScript | ✅     | 77.3      | 0.6306              | 128.09                 |
-    | YOLO11m | ONNX        | ✅     | 76.9      | 0.6306              | 76.06                  |
-    | YOLO11m | OpenVINO    | ✅     | 77.1      | 0.6306              | 79.38                  |
-    | YOLO11l | PyTorch     | ✅     | 49.0      | 0.6367              | 150.38                 |
-    | YOLO11l | TorchScript | ✅     | 97.7      | 0.6408              | 172.57                 |
-    | YOLO11l | ONNX        | ✅     | 97.0      | 0.6408              | 108.91                 |
-    | YOLO11l | OpenVINO    | ✅     | 97.3      | 0.6408              | 102.30                 |
-    | YOLO11x | PyTorch     | ✅     | 109.3     | 0.6989              | 272.72                 |
-    | YOLO11x | TorchScript | ✅     | 218.1     | 0.6900              | 320.86                 |
-    | YOLO11x | ONNX        | ✅     | 217.5     | 0.6900              | 196.20                 |
-    | YOLO11x | OpenVINO    | ✅     | 217.8     | 0.6900              | 195.32                 |
-
 ### Intel® Core™ Ultra
 
 The Intel® Core™ Ultra™ series represents a new benchmark in high-performance computing, engineered to meet the evolving demands of modern users—from gamers and creators to professionals leveraging AI. This next-generation lineup is more than a traditional CPU series; it combines powerful CPU cores, integrated high-performance GPU capabilities, and a dedicated Neural Processing Unit (NPU) within a single chip, offering a unified solution for diverse and intensive computing workloads.
