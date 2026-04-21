@@ -1856,11 +1856,18 @@ class ADMBHead(nn.Module):
             self.memory_bank = torch.zeros((10, embed_dim), device=device)
         return self.memory_bank
 
-    def _anomaly_scores(self, features: torch.Tensor, mem: torch.Tensor | None = None) -> torch.Tensor:
+    def _anomaly_scores(self, features: torch.Tensor, mem: torch.Tensor | None = None, chunk_size: int | None = None) -> torch.Tensor:
         """Return Noisy-OR anomaly scores ∈ [0, 1] for every spatial position.
 
         Shape: [B*H*W].  0 = normal, 1 = anomalous.
         Falls back to 0.5 (neutral) when the memory bank is empty.
+
+        Args:
+            chunk_size: Number of query positions processed at once to bound peak memory.
+                        Peak sim matrix = chunk_size × mem_size × 4 bytes
+                        (e.g. 4096 × 57 000 ≈ 936 MB instead of N × M all at once).
+                        Set to None to disable chunking (processes all N positions at once —
+                        risks OOM if N × M is large, e.g. N=102 400, M=57 000 → ~23 GB).
         """
         if mem is None or mem.numel() == 0 or mem.shape[0] == 0:
             n = features.numel() // features.shape[1] if features.dim() == 4 else features.shape[0]
@@ -1870,24 +1877,31 @@ class ADMBHead(nn.Module):
             features = features.permute(0, 2, 3, 1).reshape(-1, C)
         q = F.normalize(features.view(-1, self.feature_dim), p=2, dim=1)
 
+        N = q.shape[0]
+        k = min(self.K, mem.shape[0])
+        prob = torch.empty(N, device=q.device, dtype=q.dtype)
 
-        # calculate cosine similarity between query features and memory bank features
-        sim = q @ mem.t()  # [N, M]
+        # chunk_size=None → single-shot (original behaviour, risks OOM for large N×M).
+        # Any positive integer caps the sim-matrix rows, bounding peak memory to
+        # chunk_size × M × 4 bytes regardless of batch size or spatial resolution.
+        _chunk = N if chunk_size is None else chunk_size
+        for start in range(0, N, _chunk):
+            end = min(start + _chunk, N)
+            q_chunk = q[start:end]                              # [chunk, C]
 
-        # ψ(x) = exp (−β(1 − x)), where x is the cosine similarity and β is the temperature hyperparameter. This transformation maps the cosine similarity to a value between 0 and 1, where higher similarity results in a value closer to 1, and lower similarity results in a value closer to 0. The temperature parameter β controls the sensitivity of the transformation, with higher values making it more sensitive to differences in similarity.
-        sim = torch.exp(-self.temperature * (1 - sim)) # [N, M], 
+            # calculate cosine similarity between query features and memory bank features
+            sim = q_chunk @ mem.t()                             # [chunk, M]
 
-        
-        # select top-k most similar features for each query position, where k is a hyperparameter that determines how many of the most similar features to consider when calculating the anomaly score. The topk function returns the k largest values along the specified dimension (in this case, dim=1) and their corresponding indices. By selecting only the top-k most similar features, we can focus on the most relevant information in the memory bank while reducing computational complexity.
-        k = min(self.K, sim.shape[1])
-        topk_sim = sim.topk(k=k, dim=1).values           
+            # ψ(x) = exp(−β(1 − x)): maps cosine similarity → [0, 1] with temperature β
+            sim = torch.exp(-self.temperature * (1 - sim))     # [chunk, M]
 
+            # Top-k most similar bank entries per query position
+            topk_sim = sim.topk(k=k, dim=1).values             # [chunk, k]
 
-        # Noisy-OR (uniform weights): P(anomaly) = Π(1 - sim_i)^(1/k). This formula maps the top-k similarity scores to an overall anomaly probability. 
-        score=(1 - topk_sim).clamp(min=1e-8)
-        log_prob = (topk_sim.new_ones(1, k) / k * torch.log(score)).sum(dim=1)
-        prob= torch.exp(log_prob).clamp(0, 1) # [n*n]
-  
+            # Noisy-OR (uniform weights): P(anomaly) = exp(mean(log(1 - sim_i)))
+            score = (1 - topk_sim).clamp(min=1e-8)
+            log_prob = (topk_sim.new_ones(1, k) / k * torch.log(score)).sum(dim=1)
+            prob[start:end] = torch.exp(log_prob).clamp(0, 1)
 
         return prob
 
