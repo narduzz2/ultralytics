@@ -230,6 +230,7 @@ def build_output_paths(args):
         extra_tags.append("nofp32attn" if args.no_fp32_attn else "fp32attn")
     suffix = f"_{'_'.join(extra_tags)}" if extra_tags else ""
     base_stem = Path(args.name).stem if args.name else f"{weights_path.stem}_op{args.opset}_{sim_tag}_{rope_tag}"
+    base_stem = f"rtdetr_{base_stem}"
     stem = f"{base_stem}{suffix}"
 
     # Name the intermediate ONNX after the requested precision so artifact sets stay easy to compare.
