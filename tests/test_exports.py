@@ -385,9 +385,10 @@ def test_export_axelera():
 
 
 @pytest.mark.skipif(not LINUX or ARM64, reason="DeepX export only supported on non-aarch64 Linux")
+@pytest.mark.skipif(checks.IS_PYTHON_3_8, reason="dx_com torch mid-run upgrade segfaults DataLoader on Python 3.8")
 def test_export_deepx():
     """Test YOLO export to DeepX format."""
-    # For faster testing, use a smaller calibration dataset (32 image size crashes deepx export, so 64 is used)
-    file = YOLO(MODEL).export(format="deepx", imgsz=64, data="coco8.yaml")
+    # For faster testing, use a smaller calibration dataset
+    file = YOLO(MODEL).export(format="deepx", imgsz=32, data="coco8.yaml")
     assert Path(file).exists(), f"DeepX export failed, directory not found: {file}"
     shutil.rmtree(file, ignore_errors=True)  # cleanup
