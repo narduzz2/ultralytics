@@ -1679,7 +1679,7 @@ class ReidMetrics(SimpleClass, DataExportMixin):
             axis=0,
         )
         original_dist = np.clip(2.0 - 2.0 * original_dist, 0, None).astype(np.float32)
-        original_dist /= original_dist.max(axis=0, keepdims=True) + 1e-12
+        original_dist /= original_dist.max(axis=1, keepdims=True) + 1e-12
 
         all_num = original_dist.shape[0]
         query_num = len(query_feats)
