@@ -69,7 +69,7 @@ class AFSSScheduler:
             forced_easy = [i for i in easy_set if (epoch - 1 - self.state[i]["last_seen_epoch"]) >= 10]
             easy_budget = round(0.02 * len(easy_set))
             forced_easy_quota = min(len(forced_easy), math.floor(0.5 * easy_budget))
-            random_easy_quota = max(easy_budget - forced_easy_quota, 0)
+            random_easy_quota = easy_budget - forced_easy_quota
 
             if easy_budget > 0:
                 forced_easy_sample = []
@@ -85,10 +85,10 @@ class AFSSScheduler:
         # Moderate set
         if moderate_set:
             forced_moderate = [i for i in moderate_set if (epoch - 1 - self.state[i]["last_seen_epoch"]) >= 3]
-            M1 = round(0.4 * len(moderate_set)) - len(forced_moderate)
-            random_moderate_quota = max(min(len(moderate_set) - len(forced_moderate), M1), 0)
+            moderate_budget = round(0.4 * len(moderate_set))
             selected.extend(forced_moderate)
 
+            random_moderate_quota = moderate_budget - len(forced_moderate)
             remaining_moderate = [i for i in moderate_set if i not in forced_moderate]
             if random_moderate_quota > 0 and remaining_moderate:
                 random_moderate_sample = rng.choice(
