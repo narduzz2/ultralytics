@@ -368,14 +368,6 @@ def test_export_executorch_matrix(task):
     shutil.rmtree(file, ignore_errors=True)  # cleanup
 
 
-@pytest.mark.skipif(not LINUX or ARM64, reason="DeepX export only supported on non-aarch64 Linux")
-def test_export_deepx():
-    """Test YOLO export to DeepX format."""
-    file = YOLO(MODEL).export(format="deepx", imgsz=32, data="coco8.yaml")
-    assert Path(file).exists(), f"DeepX export failed, directory not found: {file}"
-    shutil.rmtree(file, ignore_errors=True)  # cleanup
-
-
 @pytest.mark.slow
 @pytest.mark.skipif(not TORCH_2_8, reason="Axelera export requires torch>=2.8.0")
 @pytest.mark.skipif(
@@ -389,4 +381,13 @@ def test_export_axelera():
     file = YOLO(MODEL).export(format="axelera", imgsz=64, data="coco8.yaml")
     assert Path(file).exists(), f"Axelera export failed, directory not found: {file}"
     # Note: Inference testing skipped as it requires Axelera hardware
+    shutil.rmtree(file, ignore_errors=True)  # cleanup
+    
+    
+@pytest.mark.skipif(not LINUX or ARM64, reason="DeepX export only supported on non-aarch64 Linux")
+def test_export_deepx():
+    """Test YOLO export to DeepX format."""
+    # For faster testing, use a smaller calibration dataset (32 image size crashes deepx export, so 64 is used)
+    file = YOLO(MODEL).export(format="deepx", imgsz=64, data="coco8.yaml")
+    assert Path(file).exists(), f"DeepX export failed, directory not found: {file}"
     shutil.rmtree(file, ignore_errors=True)  # cleanup
