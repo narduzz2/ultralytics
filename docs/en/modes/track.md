@@ -202,6 +202,133 @@ For better performance, especially when using a separate classification model fo
 
 Once exported, you can point to the TensorRT model path in your tracker config, and it will be used for ReID during tracking.
 
+### TrackTrack
+
+[TrackTrack](https://openaccess.thecvf.com/content/CVPR2025/papers/Shim_Focusing_on_Tracks_for_Online_Multi-Object_Tracking_CVPR_2025_paper.pdf) (Shim et al., CVPR 2025) is a track-focused online multi-object tracker. Unlike ByteTrack and BoT-SORT which primarily look at matching from the detection side — TrackTrack reasons from each track's perspective and combines multiple cues in a single cost matrix. It introduces two main ideas on top of standard tracking-by-detection:
+
+- **Track-Perspective-Based Association (TPA):** a multi-cue cost combining HMIoU (IoU modulated by vertical overlap), cosine ReID distance, confidence-projection distance, and corner-angle distance. The assignment is solved iteratively with a threshold that relaxes at each iteration, so high-quality matches are locked in first and harder pairs are revisited with looser gates. Low-confidence detections and detections recovered from a looser secondary NMS pass (`D_del`) are added to the cost with penalty terms so they can still rebind lost tracks without stealing strong matches.
+- **Track-Aware Initialization (TAI):** before spawning a new track, candidate detections are suppressed if they heavily overlap an existing track or a stronger detection. This greatly reduces duplicate IDs in crowded scenes.
+
+TrackTrack also uses NSA-Kalman updates (measurement-noise scaled by detection confidence) and score-adaptive EMA smoothing of ReID features. Global motion compensation (GMC) is enabled by default via sparse optical flow and can be tuned or skipped for speed.
+
+#### When to use TrackTrack
+
+- Crowded scenes with frequent occlusion (pedestrians, retail, sports) where duplicate IDs are a problem.
+- Scenarios where you want good performance without necessarily enabling ReID — the multi-cue cost already uses HMIoU, confidence projection, and corner-angle cues.
+- Moving-camera footage where GMC helps, but you also want one-knob control over the speed/accuracy trade-off via `gmc_downscale`, `gmc_max_corners`, and `gmc_skip_frames`.
+
+#### TrackTrack-specific arguments
+
+In addition to the shared arguments (`track_high_thresh`, `track_low_thresh`, `new_track_thresh`, `track_buffer`, `match_thresh`, `gmc_method`, `with_reid`, `model`), TrackTrack exposes the following parameters in [`tracktrack.yaml`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/trackers/tracktrack.yaml):
+
+| **Parameter**      | **Valid Values or Ranges** | **Description**                                                                                                              |
+| ------------------ | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `lost_match_thr`   | `0.0-1.0`                  | Looser gate used to rebind lost tracks. Set `>` `match_thresh` to enable a second pass; set equal to disable it.             |
+| `iou_weight`       | `0.0-1.0`                  | Weight of the HMIoU distance term in the multi-cue cost matrix.                                                              |
+| `reid_weight`      | `0.0-1.0`                  | Weight of the cosine ReID distance. If ReID is disabled, HMIoU is used as a fallback so this weight still applies.           |
+| `conf_weight`      | `0.0-1.0`                  | Weight of the confidence-projection distance (tracks extrapolate their score and are compared to detection confidence).      |
+| `angle_weight`     | `0.0-1.0`                  | Weight of the corner-angle distance between each track's per-corner velocity and the track-to-detection direction.           |
+| `det_thr`          | `0.0-1.0`                  | Detection threshold that separates high- from low-confidence detections for the penalty logic.                               |
+| `penalty_p`        | `0.0-1.0`                  | Cost penalty added to low-confidence detections (`D_low`) during association.                                                |
+| `penalty_q`        | `0.0-1.0`                  | Cost penalty added to detections recovered by the looser secondary NMS (`D_del`).                                            |
+| `reduce_step`      | `0.0-1.0`                  | Amount by which the match threshold is relaxed at each iteration of the iterative assignment.                                |
+| `tai_thr`          | `0.0-1.0`                  | IoU threshold used by Track-Aware Initialization NMS to suppress duplicate-looking spawn candidates.                         |
+| `init_thr`         | `0.0-1.0`                  | Minimum detection score required to initialize a new track from TAI.                                                         |
+| `min_track_len`    | `>=0`                      | Minimum number of successful updates before a newly spawned track is confirmed (promoted to `Tracked`).                      |
+| `gmc_downscale`    | `>=1`                      | Downscale factor for the GMC input image. Higher values are faster but less accurate.                                        |
+| `gmc_max_corners`  | `>=1`                      | Max keypoints for `sparseOptFlow`. 200 is typically enough for an affine warp.                                               |
+| `gmc_skip_frames`  | `>=0`                      | Skip `N` frames between GMC updates and reuse the cached warp. `0` = recompute every frame.                                  |
+
+#### Example: running TrackTrack
+
+!!! example
+
+    === "Python"
+
+        ```python
+        from ultralytics import YOLO
+
+        # Load a detection, segmentation, or pose model
+        model = YOLO("yolo26n.pt")
+
+        # Run tracking with TrackTrack
+        results = model.track(
+            source="https://youtu.be/LNwODJXcvt4",
+            tracker="tracktrack.yaml",
+            show=True,
+        )
+        ```
+
+    === "CLI"
+
+        ```bash
+        yolo track model=yolo26n.pt source="https://youtu.be/LNwODJXcvt4" tracker="tracktrack.yaml"
+        ```
+
+#### Example: TrackTrack with ReID
+
+ReID is optional in TrackTrack when it's disabled, the `reid_weight` falls back to HMIoU. Enabling it gives appearance-based rebinding across longer occlusions, at some additional cost:
+
+!!! example "TrackTrack + ReID"
+
+    === "Python"
+
+        ```python
+        from ultralytics import YOLO
+
+        # Copy ultralytics/cfg/trackers/tracktrack.yaml and set:
+        #   with_reid: True
+        #   model: auto       # or path to a YOLO ReID model for better ReID features
+        model = YOLO("yolo26n.pt")
+        results = model.track(
+            source="path/to/crowded_scene.mp4",
+            tracker="custom_tracktrack.yaml",
+            persist=True,
+            show=True,
+        )
+        ```
+
+#### Example: streaming loop with track IDs
+
+!!! example "Per-frame tracking loop"
+
+    ```python
+    import cv2
+
+    from ultralytics import YOLO
+
+    model = YOLO("yolo26n.pt")
+    cap = cv2.VideoCapture("path/to/video.mp4")
+
+    while cap.isOpened():
+        ok, frame = cap.read()
+        if not ok:
+            break
+
+        # persist=True tells the tracker this frame follows the previous one
+        result = model.track(frame, tracker="tracktrack.yaml", persist=True)[0]
+
+        if result.boxes and result.boxes.is_track:
+            ids = result.boxes.id.int().cpu().tolist()
+            xyxy = result.boxes.xyxy.cpu().tolist()
+            for tid, (x1, y1, x2, y2) in zip(ids, xyxy):
+                print(f"id={tid} box=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f})")
+
+        cv2.imshow("TrackTrack", result.plot())
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    ```
+
+#### Tuning tips
+
+- **Crowded pedestrians:** keep the defaults, but consider lowering `tai_thr` (e.g. `0.45`) to suppress more duplicate spawns, and raising `track_buffer` so lost tracks survive longer occlusions.
+- **Fast camera motion:** keep `gmc_method: sparseOptFlow`, lower `gmc_downscale` (e.g. `2`) and/or raise `gmc_max_corners`. If GMC becomes a bottleneck, set `gmc_skip_frames: 1` or `2`.
+- **Small/fast objects:** raise `angle_weight` slightly so direction-of-motion contributes more, and lower `min_track_len` to confirm tracks faster.
+- **Enable ReID only when needed:** it adds inference cost; for scenes with short occlusions, the default multi-cue cost is usually sufficient.
+
 ## Python Examples
 
 <p align="center">
@@ -475,6 +602,19 @@ To run object tracking on multiple video streams simultaneously, you can use Pyt
 
     # Clean up and close windows
     cv2.destroyAllWindows()
+    ```
+
+### When should I use TrackTrack instead of BoT-SORT or ByteTrack?
+
+TrackTrack is a good choice when identity preservation is critical — especially in crowded scenes with frequent occlusion. It combines multiple cues (HMIoU, ReID, confidence projection, corner-angle distance) from each track's perspective and solves the association with an iterative threshold, which helps high-quality matches lock in first. Track-Aware Initialization (TAI) also suppresses duplicate spawns before a new ID is created, reducing ID fragmentation. ByteTrack remains the fastest option for simple scenes, BoT-SORT is a strong general-purpose baseline with optional ReID, and TrackTrack trades a bit of overhead for better behavior under occlusion and crowding. Enable it with `tracker="tracktrack.yaml"`:
+
+!!! example
+
+    ```python
+    from ultralytics import YOLO
+
+    model = YOLO("yolo26n.pt")
+    results = model.track(source="path/to/video.mp4", tracker="tracktrack.yaml")
     ```
 
 ### What are the real-world applications of multi-object tracking with Ultralytics YOLO?
