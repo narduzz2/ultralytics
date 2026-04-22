@@ -588,7 +588,7 @@ class YOLOAnomaly(Model):
         Examples:
             >>> model.load_support_set("datasets/mvtec/leather/train/good/")
         """
-        from ultralytics.utils import LOGGER
+        from ultralytics.utils import LOGGER, TQDM
 
         def iter_support_sources(src):
             """Yield support images one-by-one so memory updates happen incrementally."""
@@ -613,7 +613,8 @@ class YOLOAnomaly(Model):
         if verbose:
             LOGGER.info("YOLOAnomaly: building memory bank from support set...")
         self.model.set_memory_update(True)
-        for item in iter_support_sources(source):
+        items = list(iter_support_sources(source))
+        for item in TQDM(items, desc="Building memory bank"):
             self.predict(source=item, conf=conf, imgsz=imgsz, device=device, verbose=False, **kwargs)
         self.model.freeze_memory_bank()
         stats = self.model.get_memory_bank_stats()
