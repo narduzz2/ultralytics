@@ -1992,7 +1992,8 @@ class ADMBHead(nn.Module):
         # spatial mean filter on feature map to suppress isolated-pixel noise before scoring
         if self.score_filter_kernel > 1:
             pad = self.score_filter_kernel // 2
-            cls_feat = F.avg_pool2d(cls_feat, kernel_size=self.score_filter_kernel, stride=1, padding=pad)
+            cls_feat = F.avg_pool2d(cls_feat, kernel_size=self.score_filter_kernel, stride=1, padding=pad,
+                                    count_include_pad=True)
 
         # compute per-image anomaly scores: [B, H*W]
         scores_per_image = self._anomaly_scores(cls_feat, mem=self._memory_tensor()).view(B, -1)
