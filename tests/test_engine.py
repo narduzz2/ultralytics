@@ -201,3 +201,91 @@ def test_train_reuses_loaded_checkpoint_model(monkeypatch):
     assert captured["trainer"].model is original_model, "Trainer model does not match original"
     assert captured["cfg"] == original_model.yaml, f"Config mismatch: {captured['cfg']} != {original_model.yaml}"
     assert captured["weights"] is original_model, "Weights do not match original model"
+
+
+def test_afss_scheduler():
+    """Test AFSSScheduler sampling, update_last_seen, and update_metrics."""
+    from ultralytics.utils.afss import AFSSScheduler
+
+    scheduler = AFSSScheduler(10, seed=0)
+    # All hard by default -> all selected
+    assert len(scheduler.sample_indices(1)) == 10
+
+    # Set easy and moderate images
+    scheduler.state[0] = {"precision": 0.9, "recall": 0.9, "last_seen_epoch": -1}
+    scheduler.state[1] = {"precision": 0.7, "recall": 0.7, "last_seen_epoch": -1}
+    selected = scheduler.sample_indices(1)
+    assert all(i in selected for i in range(2, 10))  # hard all included
+    assert len(selected) < 10  # easy/moderate partially sampled
+
+    scheduler.update_last_seen(selected, 1)
+    for i in selected:
+        assert scheduler.state[i]["last_seen_epoch"] == 1
+
+    scheduler.update_metrics(
+        {"img0.jpg": {"precision": 0.5, "recall": 0.5}},
+        {"img0.jpg": 0},
+    )
+    assert scheduler.state[0]["precision"] == 0.5
+
+
+def test_train_afss(tmp_path):
+    """Test detection training with AFSS enabled."""
+    args = {
+        "data": "coco8.yaml",
+        "model": "yolo26n.yaml",
+        "imgsz": 32,
+        "epochs": 10,
+        "warmup_epochs": 1.0,
+        "afss": True,
+        "plots": False,
+        "workers": 0,
+        "project": tmp_path,
+        "name": "afss",
+        "exist_ok": True,
+    }
+    trainer = detect.DetectionTrainer(overrides=args)
+    trainer.train()
+    assert hasattr(trainer, "afss_scheduler")
+    assert (trainer.wdir / "afss_state.pt").exists()
+
+
+def test_resume_afss(tmp_path):
+    """Test AFSS state is saved and restored on resume."""
+    train_args = {
+        "data": "coco8.yaml",
+        "model": "yolo26n.yaml",
+        "imgsz": 32,
+        "epochs": 10,
+        "warmup_epochs": 1.0,
+        "afss": True,
+        "save": True,
+        "plots": False,
+        "workers": 0,
+        "project": tmp_path,
+        "name": "afss_resume",
+        "exist_ok": True,
+    }
+
+    def stop_after_first(trainer):
+        if trainer.epoch == 0:
+            trainer.stop = True
+
+    model = YOLO("yolo26n.yaml")
+    model.add_callback("on_train_epoch_end", stop_after_first)
+    model.train(**train_args)
+    last_path = model.trainer.last
+    state_before = {k: v["last_seen_epoch"] for k, v in model.trainer.afss_scheduler.state.items()}
+    assert (model.trainer.wdir / "afss_state.pt").exists()
+
+    captured = {}
+
+    def capture_afss_state(trainer):
+        if trainer.epoch == 1 and not captured:
+            captured["state"] = {k: v["last_seen_epoch"] for k, v in trainer.afss_scheduler.state.items()}
+
+    resume_model = YOLO(last_path)
+    resume_model.add_callback("on_train_epoch_start", capture_afss_state)
+    resume_model.train(resume=True, **train_args)
+    assert hasattr(resume_model.trainer, "afss_scheduler")
+    assert captured.get("state") == state_before
