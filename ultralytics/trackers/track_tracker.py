@@ -24,9 +24,9 @@ import torch
 from ..utils import LOGGER
 from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
-from .byte_tracker import BYTETracker, STrack
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYWH
+from .utils.stracks import joint_stracks, multi_gmc, remove_duplicate_stracks, sub_stracks
 
 # Corner index arrays for angle-distance vectorization: LT, LB, RT, RB of an (x1,y1,x2,y2) box
 _CORNER_DX_IDX = np.array([0, 0, 2, 2])
@@ -275,9 +275,9 @@ class TTSTrack(BaseTrack):
     _alpha = 0.95  # EMA smoothing for ReID features
     _delta_t = 3  # corner-velocity look-back window
 
-    # STrack and TTSTrack both hold an 8-d Kalman state ordered (*box, *box_velocity) with the
-    # position as the first two dims, so the GMC warp code works for both.
-    multi_gmc = staticmethod(STrack.multi_gmc)
+    # TTSTrack holds an 8-d Kalman state ordered (*box, *box_velocity) with the position
+    # as the first two dims, so the shared GMC warp helper applies directly.
+    multi_gmc = staticmethod(multi_gmc)
 
     def __init__(self, xywh: list[float], score: float, cls: Any, feat: np.ndarray | None = None):
         """Create a new track from a detection bounding box.
@@ -470,11 +470,11 @@ class TRACKTRACK:
         >>> tracked_objects = tracker.update(yolo_results, img=image)
     """
 
-    # Reuse BYTETracker's purely-structural helpers (they only rely on .track_id / .frame_id /
-    # .start_frame / .xyxy which TTSTrack exposes).
-    joint_stracks = staticmethod(BYTETracker.joint_stracks)
-    sub_stracks = staticmethod(BYTETracker.sub_stracks)
-    remove_duplicate_stracks = staticmethod(BYTETracker.remove_duplicate_stracks)
+    # Purely-structural list helpers shared with BYTETracker; they only touch attributes
+    # that TTSTrack also exposes (.track_id / .frame_id / .start_frame / .xyxy).
+    joint_stracks = staticmethod(joint_stracks)
+    sub_stracks = staticmethod(sub_stracks)
+    remove_duplicate_stracks = staticmethod(remove_duplicate_stracks)
 
     def __init__(self, args, frame_rate: int = 30):
         """Initialize from a tracker config. See `ultralytics/cfg/trackers/tracktrack.yaml`."""
