@@ -219,15 +219,34 @@ class IdentityBalancedSampler(torch.utils.data.Sampler):
 
     Each iteration: shuffle pids, pick P, sample K images per pid (with replacement if fewer than K available).
 
+    In DDP the full PID list is shuffled deterministically from (epoch, base_seed) so all ranks agree on the
+    ordering, then each rank takes a disjoint shard via `pids[rank::world_size]`. Every epoch a new seed is
+    derived from `epoch * LARGE_PRIME + rank` so ranks and epochs are uncorrelated. All randomness is driven
+    by a local `random.Random` instance — no reliance on the global `random` state or `torch`'s global RNG.
+
+    The trainer must call `set_epoch(epoch)` at the start of each epoch for proper per-epoch shuffling and
+    cross-rank coordination, mirroring `torch.utils.data.distributed.DistributedSampler`.
+
     Args:
         dataset: A ReidDataset with pid_to_indices attribute.
         p (int): Number of identities per batch.
         k (int): Number of images per identity per batch.
         num_replicas (int, optional): Number of distributed processes.
         rank (int, optional): Rank of current process.
+        seed (int, optional): Base seed combined with the epoch for deterministic shuffling.
     """
 
-    def __init__(self, dataset, p: int = 16, k: int = 4, num_replicas: int | None = None, rank: int | None = None):
+    _LARGE_PRIME = 2_147_483_647  # Mersenne prime, epoch multiplier for seed derivation
+
+    def __init__(
+        self,
+        dataset,
+        p: int = 16,
+        k: int = 4,
+        num_replicas: int | None = None,
+        rank: int | None = None,
+        seed: int = 42,
+    ):
         """Initialize IdentityBalancedSampler."""
         self.pid_to_indices = dataset.pid_to_indices
         self.pids = list(self.pid_to_indices.keys())
@@ -241,38 +260,58 @@ class IdentityBalancedSampler(torch.utils.data.Sampler):
             rank = dist.get_rank() if dist.is_initialized() else 0
         self.num_replicas = num_replicas
         self.rank = rank
+        self.seed = seed
+        self.epoch = 0
 
-        # Each rank gets different P identities
-        self.num_batches = len(self.pids) // (self.p * self.num_replicas)
-        self.num_batches = max(self.num_batches, 1)
+        # Per-rank PID shard: each rank walks a disjoint slice of the globally shuffled PID list.
+        # num_batches is computed on this rank's shard only, not the full list.
+        num_pids_this_rank = len(self._shard_pids(self._shuffled_pids(epoch=0)))
+        self.num_batches = max(num_pids_this_rank // self.p, 1)
         self.total_size = self.num_batches * self.batch_size
+
+    def _derive_seed(self, epoch: int) -> int:
+        """Derive a reproducible per-(epoch, rank) seed."""
+        return (epoch * self._LARGE_PRIME + self.rank + self.seed) & 0xFFFFFFFF
+
+    def _shuffled_pids(self, epoch: int) -> list:
+        """Return the full PID list shuffled deterministically from (epoch, seed). Identical across ranks."""
+        # Seed independent of rank so every rank produces the same global ordering before sharding.
+        rng = random.Random((epoch * self._LARGE_PRIME + self.seed) & 0xFFFFFFFF)
+        pids = list(self.pids)
+        rng.shuffle(pids)
+        return pids
+
+    def _shard_pids(self, pid_order: list) -> list:
+        """Return this rank's disjoint slice of the (already-shuffled) PID list."""
+        return pid_order[self.rank :: self.num_replicas]
 
     def __iter__(self) -> Iterator:
         """Generate indices for PK sampling."""
-        # Shuffle pids deterministically
-        g = torch.Generator()
-        g.manual_seed(self.rank + 42)
-        pid_order = [self.pids[i] for i in torch.randperm(len(self.pids), generator=g).tolist()]
+        rng = random.Random(self._derive_seed(self.epoch))
+
+        # Shuffle the full PID list identically on every rank, then take this rank's shard.
+        pid_order = self._shard_pids(self._shuffled_pids(self.epoch))
 
         indices = []
         for pid in pid_order:
             pid_indices = self.pid_to_indices[pid]
             if len(pid_indices) >= self.k:
-                selected = random.sample(pid_indices, self.k)
+                selected = rng.sample(pid_indices, self.k)
             else:
-                selected = random.choices(pid_indices, k=self.k)
+                selected = rng.choices(pid_indices, k=self.k)
             indices.extend(selected)
             if len(indices) >= self.total_size:
                 break
 
-        # Pad if needed
+        # Pad if needed. Draw pad PIDs from this rank's shard to keep shards disjoint across ranks.
+        pad_pool = pid_order if pid_order else self.pids
         while len(indices) < self.total_size:
-            pid = random.choice(self.pids)
+            pid = rng.choice(pad_pool)
             pid_indices = self.pid_to_indices[pid]
             if len(pid_indices) >= self.k:
-                selected = random.sample(pid_indices, self.k)
+                selected = rng.sample(pid_indices, self.k)
             else:
-                selected = random.choices(pid_indices, k=self.k)
+                selected = rng.choices(pid_indices, k=self.k)
             indices.extend(selected)
 
         return iter(indices[: self.total_size])
@@ -280,6 +319,14 @@ class IdentityBalancedSampler(torch.utils.data.Sampler):
     def __len__(self) -> int:
         """Return the number of samples per epoch."""
         return self.total_size
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the epoch for this sampler. Must be called each epoch before iteration (see DistributedSampler).
+
+        Args:
+            epoch (int): Epoch number used (with rank and seed) to derive the shuffle seed.
+        """
+        self.epoch = epoch
 
 
 def build_reid_dataloader(
@@ -317,6 +364,11 @@ def build_reid_dataloader(
             num_replicas=dist.get_world_size() if rank != -1 and dist.is_initialized() else 1,
             rank=max(rank, 0),
         )
+        # TODO: trainer (ultralytics/engine/trainer.py:397-398) only calls sampler.set_epoch(epoch)
+        # when RANK != -1. For single-GPU runs the sampler stays at epoch=0 forever, which means
+        # the PID order/sample draws repeat every epoch. The `set_epoch` call should be made
+        # unconditionally (or at least whenever the sampler supports it) so single-GPU ReID
+        # training also gets fresh per-epoch shuffling.
         batch_size = p * k  # override batch_size to match PK
     else:
         sampler = None if rank == -1 else distributed.DistributedSampler(dataset, shuffle=False)

@@ -396,6 +396,8 @@ class BaseTrainer:
             self._model_train()
             if RANK != -1:
                 self.train_loader.sampler.set_epoch(epoch)
+            elif hasattr(self.train_loader, "sampler") and hasattr(self.train_loader.sampler, "set_epoch"):
+                self.train_loader.sampler.set_epoch(epoch)
             pbar = enumerate(self.train_loader)
             # Update dataloader attributes (optional)
             if epoch == (self.epochs - self.args.close_mosaic):
