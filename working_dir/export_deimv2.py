@@ -28,7 +28,7 @@ def parse_args():
         "--name",
         type=str,
         default=None,
-        help="Optional experiment stem. Defaults to '<weights>_op{opset}_{sim|nosim}'.",
+        help="Optional experiment stem. Defaults to '<weights>_op{opset}_{sim|nosim}_{rope|norope}[...tags]'.",
     )
     p.add_argument(
         "--outdir",
@@ -37,6 +37,12 @@ def parse_args():
         help="Optional output directory. Defaults to the weights directory.",
     )
     p.add_argument("--workspace", type=float, default=None, help="TensorRT workspace size in GB.")
+    p.add_argument(
+        "--export-eval-idx",
+        type=int,
+        default=None,
+        help="Override decoder eval_idx only for export. Example: 3 keeps decoder layers 0..3 during export.",
+    )
     p.add_argument(
         "--no-fp32-attn",
         action="store_true",
@@ -217,7 +223,12 @@ def build_output_paths(args):
     outdir = Path(args.outdir) if args.outdir else weights_path.parent
     rope_tag = "rope" if args.ropefix else "norope"
     sim_tag = "sim" if args.simplify else "nosim"
-    stem = Path(args.name).stem if args.name else f"{weights_path.stem}_op{args.opset}_{sim_tag}_{rope_tag}"
+    extra_tags = []
+    if args.export_eval_idx is not None:
+        extra_tags.append(f"eidx{args.export_eval_idx}")
+    suffix = f"_{'_'.join(extra_tags)}" if extra_tags else ""
+    base_stem = Path(args.name).stem if args.name else f"{weights_path.stem}_op{args.opset}_{sim_tag}_{rope_tag}"
+    stem = f"{base_stem}{suffix}"
 
     # Keep the intermediate ONNX explicitly marked as FP32 for engine builds, since FP16 should be applied by TRT.
     onnx_precision = "fp16" if args.format == "onnx" and args.half else "fp32"
@@ -226,6 +237,27 @@ def build_output_paths(args):
     onnx_path = outdir / f"{stem}_{onnx_precision}.onnx"
     engine_path = outdir / f"{stem}_{engine_precision}.engine"
     return onnx_path, engine_path
+
+
+def apply_export_eval_idx_override(deploy_model, export_eval_idx):
+    """Apply an export-only decoder eval_idx override before deploy conversion."""
+    decoder_modules = [m for m in deploy_model.modules() if hasattr(m, "convert_to_deploy") and hasattr(m, "eval_idx")]
+    if not decoder_modules:
+        raise RuntimeError("No deploy-convertible decoder with eval_idx was found in the export model.")
+
+    for decoder in decoder_modules:
+        num_layers = getattr(decoder, "num_layers", None)
+        if num_layers is None:
+            raise RuntimeError(f"Decoder {type(decoder).__name__} is missing num_layers; cannot validate eval_idx.")
+        if not 0 <= export_eval_idx < num_layers:
+            raise ValueError(f"--export-eval-idx must be in [0, {num_layers - 1}], got {export_eval_idx}.")
+        decoder.eval_idx = export_eval_idx
+
+    head = deploy_model.model[-1] if hasattr(deploy_model, "model") and len(deploy_model.model) else None
+    if head is not None and hasattr(head, "eval_idx"):
+        head.eval_idx = export_eval_idx
+
+    return export_eval_idx + 1
 
 
 def main():
@@ -238,6 +270,9 @@ def main():
     deploy_model.pt_path = str(onnx_path.with_suffix(".pt"))
     for p in deploy_model.parameters():
         p.requires_grad = False
+    if args.export_eval_idx is not None:
+        export_layers = apply_export_eval_idx_override(deploy_model, args.export_eval_idx)
+        print(f"Using export-only decoder eval_idx={args.export_eval_idx} ({export_layers} decoder layers).")
     for m in deploy_model.modules():
         if hasattr(m, "convert_to_deploy"):
             m.convert_to_deploy()
