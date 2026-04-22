@@ -11,6 +11,7 @@ from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
 from .utils import matching
 from .utils.kalman_filter import KalmanFilterXYAH
+from .utils.stracks import joint_stracks, multi_gmc, remove_duplicate_stracks, sub_stracks
 
 
 class STrack(BaseTrack):
@@ -97,24 +98,7 @@ class STrack(BaseTrack):
             stracks[i].mean = mean
             stracks[i].covariance = cov
 
-    @staticmethod
-    def multi_gmc(stracks: list[STrack], H: np.ndarray = np.eye(2, 3)):
-        """Update multiple track positions and covariances using a homography matrix."""
-        if stracks:
-            multi_mean = np.asarray([st.mean.copy() for st in stracks])
-            multi_covariance = np.asarray([st.covariance for st in stracks])
-
-            R = H[:2, :2]
-            R8x8 = np.kron(np.eye(4, dtype=float), R)
-            t = H[:2, 2]
-
-            for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
-                mean = R8x8.dot(mean)
-                mean[:2] += t
-                cov = R8x8.dot(cov).dot(R8x8.transpose())
-
-                stracks[i].mean = mean
-                stracks[i].covariance = cov
+    multi_gmc = staticmethod(multi_gmc)
 
     def activate(self, kalman_filter: KalmanFilterXYAH, frame_id: int):
         """Activate a new tracklet using the provided Kalman filter and initialize its state and covariance."""
@@ -431,40 +415,6 @@ class BYTETracker:
         self.kalman_filter = self.get_kalmanfilter()
         self.reset_id()
 
-    @staticmethod
-    def joint_stracks(tlista: list[STrack], tlistb: list[STrack]) -> list[STrack]:
-        """Combine two lists of STrack objects into a single list, ensuring no duplicates based on track IDs."""
-        exists = {}
-        res = []
-        for t in tlista:
-            exists[t.track_id] = 1
-            res.append(t)
-        for t in tlistb:
-            tid = t.track_id
-            if not exists.get(tid, 0):
-                exists[tid] = 1
-                res.append(t)
-        return res
-
-    @staticmethod
-    def sub_stracks(tlista: list[STrack], tlistb: list[STrack]) -> list[STrack]:
-        """Filter out the stracks present in the second list from the first list."""
-        track_ids_b = {t.track_id for t in tlistb}
-        return [t for t in tlista if t.track_id not in track_ids_b]
-
-    @staticmethod
-    def remove_duplicate_stracks(stracksa: list[STrack], stracksb: list[STrack]) -> tuple[list[STrack], list[STrack]]:
-        """Remove duplicate stracks from two lists based on Intersection over Union (IoU) distance."""
-        pdist = matching.iou_distance(stracksa, stracksb)
-        pairs = np.where(pdist < 0.15)
-        dupa, dupb = [], []
-        for p, q in zip(*pairs):
-            timep = stracksa[p].frame_id - stracksa[p].start_frame
-            timeq = stracksb[q].frame_id - stracksb[q].start_frame
-            if timep > timeq:
-                dupb.append(q)
-            else:
-                dupa.append(p)
-        resa = [t for i, t in enumerate(stracksa) if i not in dupa]
-        resb = [t for i, t in enumerate(stracksb) if i not in dupb]
-        return resa, resb
+    joint_stracks = staticmethod(joint_stracks)
+    sub_stracks = staticmethod(sub_stracks)
+    remove_duplicate_stracks = staticmethod(remove_duplicate_stracks)
