@@ -43,7 +43,12 @@ class OCSortTrack(STrack):
         self._saved_covariance: np.ndarray | None = None
 
     def activate(self, kalman_filter, frame_id: int) -> None:
-        """Activate a new tracklet and record its initial observation."""
+        """Activate a new tracklet and seed its observation history.
+
+        Args:
+            kalman_filter (KalmanFilterXYAH): Shared Kalman filter instance.
+            frame_id (int): Frame id at which the track is created.
+        """
         super().activate(kalman_filter, frame_id)
         self.last_observation = self.xyxy.copy()
         self.observations[frame_id] = self.xyxy.copy()
@@ -51,7 +56,12 @@ class OCSortTrack(STrack):
         self._saved_covariance = self.covariance.copy()
 
     def update(self, new_track: STrack, frame_id: int) -> None:
-        """Update track state with a matched detection and record the observation."""
+        """Update the track with a matched detection and record the observation.
+
+        Args:
+            new_track (STrack): Matched detection for this frame.
+            frame_id (int): Current frame id.
+        """
         obs = new_track.xyxy.copy()
         self.last_observation = obs
         self.observations[frame_id] = obs
@@ -62,7 +72,13 @@ class OCSortTrack(STrack):
         self.velocity = self._compute_velocity()
 
     def re_activate(self, new_track: STrack, frame_id: int, new_id: bool = False) -> None:
-        """Re-activate a lost track with a new detection and record the observation."""
+        """Re-activate a previously lost track with a new detection.
+
+        Args:
+            new_track (STrack): Detection used to revive this track.
+            frame_id (int): Current frame id.
+            new_id (bool): If True, assign a fresh track id instead of reusing the old one.
+        """
         obs = new_track.xyxy.copy()
         self.last_observation = obs
         self.observations[frame_id] = obs
@@ -190,7 +206,16 @@ class OCSORT(BYTETracker):
         self.use_byte = args.use_byte
 
     def init_track(self, results, img: np.ndarray | None = None) -> list[OCSortTrack]:
-        """Build :class:`OCSortTrack` instances from a `Results`-like object."""
+        """Build :class:`OCSortTrack` instances from a `Results`-like object.
+
+        Args:
+            results: Object exposing `xywh` (or `xywhr`), `conf`, and `cls`.
+            img (np.ndarray | None): Current BGR frame. Unused by OC-SORT; accepted for signature
+                parity with other trackers.
+
+        Returns:
+            (list[OCSortTrack]): One :class:`OCSortTrack` per detection, empty if no detections.
+        """
         if len(results) == 0:
             return []
         bboxes = results.xywhr if hasattr(results, "xywhr") else results.xywh
@@ -198,7 +223,15 @@ class OCSORT(BYTETracker):
         return [OCSortTrack(xywh, s, c, self.delta_t) for (xywh, s, c) in zip(bboxes, results.conf, results.cls)]
 
     def get_dists(self, tracks: list[OCSortTrack], detections: list[OCSortTrack]) -> np.ndarray:
-        """Compute the cost matrix from IoU distance plus OCM velocity-direction consistency."""
+        """Compute the cost matrix from IoU distance plus OCM velocity-direction consistency.
+
+        Args:
+            tracks (list[OCSortTrack]): Currently active tracks.
+            detections (list[OCSortTrack]): Detections to associate.
+
+        Returns:
+            (np.ndarray): `(len(tracks), len(detections))` cost matrix.
+        """
         dists = matching.iou_distance(tracks, detections)
         if self.args.fuse_score:
             dists = matching.fuse_score(dists, detections)
