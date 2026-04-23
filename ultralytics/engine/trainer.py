@@ -295,6 +295,7 @@ class BaseTrainer:
         """Configure model, optimizer, dataloaders, and training utilities before the training loop."""
         ckpt = self.setup_model()
         self.model = self.model.to(self.device)
+        self._sanitize_non_finite_values(self.model)
         self.set_model_attributes()
 
         # Compile model
@@ -896,6 +897,25 @@ class BaseTrainer:
                     "i.e. 'yolo train resume model=path/to/last.pt'"
                 ) from e
         self.resume = resume
+
+    def _sanitize_non_finite_values(self, model: torch.nn.Module) -> None:
+        """Check for and sanitize NaN/Inf values in model state_dict tensors.
+
+        Args:
+            model (nn.Module): Model whose parameters will be checked and sanitized.
+        """
+        for name, t in model.state_dict().items():
+            if not t.dtype.is_floating_point or torch.isfinite(t).all():
+                continue
+            mask = ~torch.isfinite(t)
+            n_bad = int(mask.sum())
+            if name.endswith("running_var"):
+                t[mask] = 1.0
+            elif name.endswith("running_mean"):
+                t[mask] = 0.0
+            else:
+                t[mask] = 0.0
+            LOGGER.warning(f"Sanitized {n_bad} non-finite value(s) in {name}.")
 
     def _load_checkpoint_state(self, ckpt):
         """Load optimizer, scaler, EMA, and best_fitness from checkpoint."""
