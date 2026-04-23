@@ -10,11 +10,11 @@ from ultralytics.utils.checks import check_yaml
 
 from .bot_sort import BOTSORT
 from .byte_tracker import BYTETracker
-from .fast_tracker import FastTracker
+from .fast_tracker import FASTTracker
 from .track_tracker import TRACKTRACK
 
 # A mapping of tracker types to corresponding tracker classes
-TRACKER_MAP = {"bytetrack": BYTETracker, "botsort": BOTSORT, "tracktrack": TRACKTRACK,"fasttrack": FastTracker}
+TRACKER_MAP = {"bytetrack": BYTETracker, "botsort": BOTSORT, "tracktrack": TRACKTRACK, "fasttrack": FASTTracker}
 
 
 def on_predict_start(predictor: object, persist: bool = False) -> None:
@@ -42,8 +42,7 @@ def on_predict_start(predictor: object, persist: bool = False) -> None:
 
     if cfg.tracker_type not in {"bytetrack", "botsort", "fasttrack", "tracktrack"}:
         raise AssertionError(
-            f"Only 'bytetrack', 'botsort', fasttrack and 'tracktrack' are supported for now, but got '{cfg.tracker_type}'"
-
+            f"Only 'bytetrack', 'botsort', 'fasttrack' and 'tracktrack' are supported for now, but got '{cfg.tracker_type}'"
         )
 
     predictor._feats = None  # reset ReID pre-hook state

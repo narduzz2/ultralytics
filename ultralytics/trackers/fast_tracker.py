@@ -141,7 +141,7 @@ def _coverage_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
     return (inter / (area_a[:, None] + 1e-9)).astype(np.float32)
 
 
-class FastTracker(BYTETracker):
+class FASTTracker(BYTETracker):
     """Occlusion-aware ByteTrack-style multi-object tracker.
 
     Adapted from the reference implementation in the FastTracker paper (arXiv:2508.14370). FastTracker
