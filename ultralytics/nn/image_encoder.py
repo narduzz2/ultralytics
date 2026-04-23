@@ -20,18 +20,24 @@ from ultralytics.nn.tasks import ClassificationModel
 from ultralytics.nn.teacher_model import safe_key
 
 
-def _make_adaptor(in_dim, out_dim, hidden_dim=None):
-    """Create a 2-layer MLP adaptor head per EUPE Section 4.1.
+def _make_adaptor(in_dim, out_dim, hidden_dim=None, arch="mlp"):
+    """Create an adaptor head mapping student features to teacher embed_dim.
 
-    Architecture: "linear projection without bias, LayerNorm, GELU, linear without bias" (EUPE arXiv:2603.22387, Section
-    4.1). EUPE uses hidden_dim=3072 for 86M+ students; default hidden_dim=in_dim. RADIO MLP v1 uses ReLU (verified
-    RADIO/radio/adaptor_mlp.py:27); we follow EUPE's GELU.
+    Two variants:
+        - "mlp" (EUPE Section 4.1): 2-layer "linear-LN-GELU-linear" without bias. Default hidden=in_dim; EUPE uses 3072
+          for 86M+ students. RADIO v1 uses ReLU (RADIO/radio/adaptor_mlp.py:27); we follow EUPE's GELU.
+        - "linear" (EdgeCrafter 2603.18739 Section 3.3): single token-wise Linear. Paper argues a minimal adapter keeps
+          the representational burden on the backbone rather than letting a high-capacity projection absorb the
+          mismatch.
 
     Args:
         in_dim (int): Input feature dimension from backbone.
         out_dim (int): Output dimension matching teacher embed_dim.
-        hidden_dim (int, optional): MLP hidden dimension. Defaults to in_dim.
+        hidden_dim (int, optional): MLP hidden dimension (ignored when arch="linear"). Defaults to in_dim.
+        arch (str): "mlp" | "linear".
     """
+    if arch == "linear":
+        return nn.Linear(in_dim, out_dim, bias=False)
     h = hidden_dim if hidden_dim is not None else in_dim
     return nn.Sequential(
         nn.Linear(in_dim, h, bias=False),
@@ -59,7 +65,7 @@ class ImageEncoderLoss:
         l1_weight (float): Beta in EUPE Eq.5.
     """
 
-    def __init__(self, cos_weight=0.9, l1_weight=0.1, cls_l1=False):
+    def __init__(self, cos_weight=0.9, l1_weight=0.1, cls_l1=False, distill_path="adaptor"):
         """Initialize ImageEncoderLoss.
 
         Args:
@@ -67,10 +73,14 @@ class ImageEncoderLoss:
             l1_weight (float): Weight for smooth L1 (patch always, CLS if cls_l1=True).
             cls_l1 (bool): Add smooth L1 to CLS loss. Default False matches EUPE Eq.5.
             UNIC/DUNE use True with 0.5/0.5 weights (`unic/modeling/losses.py: 54`).
+            distill_path (str): "adaptor" (cos+L1 on final-stage CLS+patch through adaptor MLP) or "feat_map"
+                (unweighted MSE across per-scale student feature maps vs bilinearly-resized teacher final-block tokens;
+                EdgeCrafter 2603.18739 Eq. L_distill = sum_l ||phi(X_L^S) - X_l^T||^2).
         """
         self.cos_weight = cos_weight
         self.l1_weight = l1_weight
         self.cls_l1 = cls_l1
+        self.distill_path = distill_path
 
     def _teacher_loss(self, s_cls, s_patch, t_cls, t_patch):
         """Compute loss for a single teacher (EUPE Eq.5).
@@ -121,11 +131,41 @@ class ImageEncoderLoss:
 
         return loss, [cls_cos.detach(), patch_cos.detach(), patch_l1.detach()]
 
+    def _teacher_loss_feat_map(self, s_scales, t_patch):
+        """Per-scale MSE between student feat maps and bilinearly-resized teacher tokens.
+
+        EdgeCrafter Eq: `L_distill = sum_l ||phi(X_L^S) - X_l^T||^2_2`. Unweighted sum across scales; no cosine, no L1.
+
+        Args:
+            s_scales (list[torch.Tensor]): Student feature maps per scale, each shape (B, D_teacher, H_s, W_s). Adaptor
+                (1x1 Conv) already applied upstream.
+            t_patch (torch.Tensor): Teacher patch tokens (B, N, D_teacher).
+
+        Returns:
+            (tuple): (teacher_loss, [mse_scale0, mse_scale1, mse_scale2]).
+        """
+        b, n, d = t_patch.shape
+        grid = int(n**0.5)
+        t_grid = t_patch.transpose(1, 2).reshape(b, d, grid, grid).to(s_scales[0])
+        items = []
+        loss = torch.tensor(0.0, device=s_scales[0].device)
+        # Force fp32 for numerical parity with the adaptor path.
+        with torch.autocast(device_type=s_scales[0].device.type, dtype=torch.float32, enabled=s_scales[0].is_cuda):
+            for s in s_scales:
+                h, w = s.shape[-2:]
+                t = F.interpolate(t_grid, size=(h, w), mode="bilinear", antialias=True) if (h, w) != (grid, grid) else t_grid
+                mse = F.mse_loss(s, t)
+                loss = loss + mse
+                items.append(mse.detach())
+        return loss, items
+
     def __call__(self, preds, batch):
         """Compute multi-teacher distillation loss (EUPE Eq.6: sum over teachers).
 
         Args:
-            preds (dict): {teacher_key: (student_cls, student_patches)} per teacher.
+            preds (dict): distill_path="adaptor": {teacher_key: (student_cls, student_patches)}.
+            distill_path="feat_map":
+            {teacher_key: [student_scale0, student_scale1, student_scale2]} with each (B, D_teacher, H, W).
             batch (dict): {teacher_key: {"cls": Tensor|None, "patches": Tensor}} per teacher. Must also contain
                 "_teacher_keys" listing the active teacher keys.
 
@@ -133,14 +173,20 @@ class ImageEncoderLoss:
             (tuple): (total_loss, stacked loss_items for all teachers).
         """
         teacher_keys = batch["_teacher_keys"]
-        total_loss = torch.tensor(0.0, device=next(iter(preds.values()))[0].device)
+        first = next(iter(preds.values()))
+        dev = first[0].device
+        total_loss = torch.tensor(0.0, device=dev)
         all_items = []
 
         for key in teacher_keys:
-            s_cls, s_patch = preds[key]
-            t_cls = batch[key]["cls"]
-            t_patch = batch[key]["patches"]
-            loss_i, items_i = self._teacher_loss(s_cls, s_patch, t_cls, t_patch)
+            if self.distill_path == "feat_map":
+                t_patch = batch[key]["patches"]
+                loss_i, items_i = self._teacher_loss_feat_map(preds[key], t_patch)
+            else:
+                s_cls, s_patch = preds[key]
+                t_cls = batch[key]["cls"]
+                t_patch = batch[key]["patches"]
+                loss_i, items_i = self._teacher_loss(s_cls, s_patch, t_cls, t_patch)
             total_loss = total_loss + loss_i
             all_items.extend(items_i)
 
@@ -166,8 +212,20 @@ class ImageEncoderModel(ClassificationModel):
         teacher_grids (dict): Per-teacher spatial grid height {safe_name: int}.
     """
 
+    # P3/P4/P5 on the cls yaml (strides 8/16/32); layers 0-8 are what cls->det intersect_dicts transfers.
+    FEAT_MAP_TAPS = (3, 5, 8)
+
     def __init__(
-        self, cfg="yolo26s-cls.yaml", ch=3, nc=1000, verbose=True, teachers=None, proj_hidden_dim=None, loss_cfg=None
+        self,
+        cfg="yolo26s-cls.yaml",
+        ch=3,
+        nc=1000,
+        verbose=True,
+        teachers=None,
+        proj_hidden_dim=None,
+        loss_cfg=None,
+        distill_path="adaptor",
+        adaptor_arch="mlp",
     ):
         """Initialize ImageEncoderModel with per-teacher adaptor heads.
 
@@ -181,29 +239,57 @@ class ImageEncoderModel(ClassificationModel):
                 backward compat.
             proj_hidden_dim (int, optional): Adaptor MLP hidden dimension. None = use backbone dim (c_). EUPE uses 3072
                 for 86M+ students.
-            loss_cfg (dict, optional): Loss config with keys cos_weight, l1_weight, cls_l1. None = EUPE defaults.
+            loss_cfg (dict, optional): Loss config with keys cos_weight, l1_weight, cls_l1, distill_path. None = EUPE
+                defaults.
+            distill_path (str): "adaptor" (default, cos+L1 on final-stage CLS+patch through adaptor MLP) or "feat_map"
+                (EdgeCrafter-style MSE at student L3/L5/L8 vs teacher final-block tokens bilinearly resized per scale;
+                uses 1x1 Conv2d adaptors).
+            adaptor_arch (str): "mlp" (default, 2-layer EUPE) or "linear" (single token-wise Linear, EdgeCrafter Section
+                3.3). Applies to the "adaptor" path only; "feat_map" path forces a 1x1 Conv2d per scale.
         """
         super().__init__(cfg, ch, nc, verbose)
         self._loss_cfg = loss_cfg or {}
+        self._loss_cfg.setdefault("distill_path", distill_path)
+        self.distill_path = distill_path
         if teachers is None:
             teachers = {"eupe:vitb16": {"embed_dim": 768, "num_patches": 256, "token_types": ("cls", "patches")}}
 
-        c_ = self.model[-1].linear.in_features  # 1280
-
-        # Shared LayerNorm on concatenated [CLS; patches] before adaptor heads (EUPE ConvNeXt pattern)
+        c_ = self.model[-1].linear.in_features
         self.token_norm = nn.LayerNorm(c_)
 
-        # Per-teacher adaptor heads (one adaptor pair per teacher, EUPE Eq.4-6)
         self.adaptors = nn.ModuleDict()
         self.teacher_grids = {}
         for name, tcfg in teachers.items():
             safe = safe_key(name)
             heads = nn.ModuleDict()
             if "cls" in tcfg["token_types"]:
-                heads["cls"] = _make_adaptor(c_, tcfg["embed_dim"], proj_hidden_dim)
-            heads["patch"] = _make_adaptor(c_, tcfg["embed_dim"], proj_hidden_dim)
+                heads["cls"] = _make_adaptor(c_, tcfg["embed_dim"], proj_hidden_dim, arch=adaptor_arch)
+            heads["patch"] = _make_adaptor(c_, tcfg["embed_dim"], proj_hidden_dim, arch=adaptor_arch)
             self.adaptors[safe] = heads
             self.teacher_grids[safe] = int(tcfg["num_patches"] ** 0.5) if tcfg["num_patches"] > 0 else 16
+
+        if distill_path == "feat_map":
+            tap_channels = self._infer_tap_channels(ch)
+            self.feat_adaptors = nn.ModuleDict()
+            for name, tcfg in teachers.items():
+                safe = safe_key(name)
+                per_scale = nn.ModuleList(
+                    [nn.Conv2d(c, tcfg["embed_dim"], kernel_size=1, bias=False) for c in tap_channels]
+                )
+                self.feat_adaptors[safe] = per_scale
+
+    def _infer_tap_channels(self, ch):
+        """Dummy-forward through backbone to read channel counts at FEAT_MAP_TAPS."""
+        self.eval()
+        with torch.no_grad():
+            x = torch.zeros(1, ch, 224, 224)
+            tap_channels = {}
+            for i, m in enumerate(self.model[:-1]):
+                x = m(x)
+                if i in self.FEAT_MAP_TAPS:
+                    tap_channels[i] = x.shape[1]
+        self.train()
+        return [tap_channels[i] for i in self.FEAT_MAP_TAPS]
 
     def loss(self, batch, preds=None):
         """Compute multi-teacher distillation loss from backbone features.
@@ -219,6 +305,22 @@ class ImageEncoderModel(ClassificationModel):
             self.criterion = self.init_criterion()
 
         x = batch["img"]
+
+        # EdgeCrafter-style feat-map path: tap cls-phase transferable layers (P3/P4/P5), project per-teacher per-scale
+        # through 1x1 Conv2d, and compute MSE vs bilinearly-resized teacher tokens. Exits early without running the
+        # final Classify head (not needed for MSE-on-feature-maps).
+        if self.distill_path == "feat_map":
+            taps = []
+            for i, m in enumerate(self.model[:-1]):
+                x = m(x)
+                if i in self.FEAT_MAP_TAPS:
+                    taps.append(x)
+            teacher_preds = {}
+            for key in self.feat_adaptors:
+                per_scale = self.feat_adaptors[key]
+                teacher_preds[key] = [proj(t) for proj, t in zip(per_scale, taps)]
+            return self.criterion(teacher_preds, batch)
+
         for m in self.model[:-1]:
             x = m(x)
         head = self.model[-1]

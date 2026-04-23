@@ -18,6 +18,9 @@ RECIPES = {
     # AM-RADIO: multi-teacher distillation (arXiv:2312.06709 Sec 4, Eq.2-3)
     # Same loss as ours (0.9cos+0.1L1). beta2=0.95 from MobileCLIP2 (training/configs/run_dfndr2b.sh)
     "radio": dict(lr0=1e-3, weight_decay=0.02, warmup_epochs=1, epochs=30, momentum=0.9, grad_clip=1.0, beta2=0.95),
+    # UNIC (ECCV 2024) reproduction used for phase1-b1-unic-eupe-vitb16 (R1 ablation baseline).
+    # lr0/wd/warmup matched from /data/shared-datasets/fatih-runs/.../phase1-b1-unic-eupe-vitb16/args.yaml.
+    "unic": dict(lr0=6e-4, weight_decay=0.03, warmup_epochs=2, epochs=30, momentum=0.9, grad_clip=3.0, beta2=None),
 }
 
 # Reference global step-batch the recipes' lr0 and warmup_epochs are tuned for. When
@@ -69,14 +72,29 @@ def main(argv: list[str]) -> None:
     args, lr_override = _pop_flag(args, "--lr")
     args, batch_override = _pop_flag(args, "--batch")
     args, fork_from = _pop_flag(args, "--fork_from")  # format: <parent_run_id>:<fork_step>
+    args, distill_path = _pop_flag(args, "--distill_path")
+    args, adaptor_arch = _pop_flag(args, "--adaptor_arch")
 
     cos_weight = float(cos_w) if cos_w else 0.9
     l1_weight = float(l1_w) if l1_w else 0.1
     cls_l1 = bool(cls_l1_str)
+    distill_path = distill_path or "adaptor"
+    adaptor_arch = adaptor_arch or "mlp"
 
     if resume:
         resume = paths.patch_resume(resume)
     resume_args = _load_train_args(resume) if resume else {}
+
+    # Resume guard: prevent silent distill_path / adaptor_arch switches. These change graph topology
+    # (feat_adaptors built or not) and loss_items labels; switching mid-run corrupts checkpoints and WandB plots.
+    if resume_args:
+        for key, now in (("distill_path", distill_path), ("adaptor_arch", adaptor_arch)):
+            prev = resume_args.get(key, "adaptor" if key == "distill_path" else "mlp")
+            if now != prev:
+                raise ValueError(
+                    f"Refusing resume: --{key} mismatch (ckpt={prev!r} vs cli={now!r}). "
+                    f"Either drop the flag or start a fresh run."
+                )
     gpu = args[0] if args else "0"
     teachers = args[1] if len(args) > 1 else resume_args.get("teachers", "eupe:vitb16")
     name = (
@@ -112,6 +130,8 @@ def main(argv: list[str]) -> None:
             cos_weight=cos_weight,
             l1_weight=l1_weight,
             cls_l1=cls_l1,
+            distill_path=distill_path,
+            adaptor_arch=adaptor_arch,
             grad_clip=r["grad_clip"],
             beta2=r["beta2"],
             wandb_group="distill",
@@ -125,6 +145,8 @@ def main(argv: list[str]) -> None:
         cos_weight=cos_weight,
         l1_weight=l1_weight,
         cls_l1=cls_l1,
+        distill_path=distill_path,
+        adaptor_arch=adaptor_arch,
         device=gpu,
         **paths.run_paths(name),
         epochs=epochs or r["epochs"],

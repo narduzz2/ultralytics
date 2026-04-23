@@ -265,6 +265,8 @@ class ImageEncoderTrainer(ClassificationTrainer):
             teachers=teachers_cfg,
             proj_hidden_dim=getattr(self.args, "proj_hidden_dim", None),
             loss_cfg=loss_cfg or None,
+            distill_path=getattr(self.args, "distill_path", "adaptor"),
+            adaptor_arch=getattr(self.args, "adaptor_arch", "mlp"),
         )
         if weights:
             model.load(weights)
@@ -415,12 +417,12 @@ class ImageEncoderTrainer(ClassificationTrainer):
         """Return ImageEncoderValidator for loss-only validation."""
         from ultralytics.models.yolo.classify.val_image_encoder import ImageEncoderValidator
 
-        # Per-teacher loss names: {safe_name}/cls_cos, {safe_name}/patch_cos, {safe_name}/patch_l1
+        dp = getattr(self.model, "distill_path", "adaptor")
+        sub = ("cls_cos", "patch_cos", "patch_l1") if dp != "feat_map" else ("feat_p3", "feat_p4", "feat_p5")
         self.loss_names = []
         for sk in self._safe_keys:
-            self.loss_names.extend([f"{sk}/cls_cos", f"{sk}/patch_cos", f"{sk}/patch_l1"])
-        # Teacher-agnostic aggregates for cross-run WandB comparison
-        self.loss_names.extend(["cls_cos", "patch_cos", "patch_l1"])
+            self.loss_names.extend([f"{sk}/{s}" for s in sub])
+        self.loss_names.extend(list(sub))
 
         # Define epoch-based x-axis so aggregate metrics align across backfilled and new runs
         try:
@@ -428,7 +430,7 @@ class ImageEncoderTrainer(ClassificationTrainer):
 
             if wandb.run:
                 for prefix in ("train", "val"):
-                    for s in ("cls_cos", "patch_cos", "patch_l1"):
+                    for s in sub:
                         wandb.define_metric(f"{prefix}/{s}", step_metric="epoch")
         except ImportError:
             pass

@@ -509,6 +509,8 @@ def check_dict_alignment(
             "cos_weight",
             "l1_weight",
             "cls_l1",
+            "distill_path",
+            "adaptor_arch",
         }
     if mismatched := [k for k in custom_keys if k not in base_keys and k not in allowed_custom_keys]:
         from difflib import get_close_matches
