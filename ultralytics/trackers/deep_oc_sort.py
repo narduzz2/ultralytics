@@ -84,20 +84,41 @@ class DeepOCSortTrack(OCSortTrack):
         self.smooth_feat = self.smooth_feat / np.linalg.norm(self.smooth_feat)
 
     def update(self, new_track: STrack, frame_id: int) -> None:
-        """Update track state with a matched detection and refresh appearance features."""
+        """Update track state with a matched detection and refresh appearance features.
+
+        Args:
+            new_track (STrack): Matched detection for this frame, with optional `curr_feat`.
+            frame_id (int): Current frame id.
+        """
         if new_track.curr_feat is not None:
             self.update_features(new_track.curr_feat, new_track.score)
         super().update(new_track, frame_id)
 
     def re_activate(self, new_track: STrack, frame_id: int, new_id: bool = False) -> None:
-        """Re-activate a lost track and refresh appearance features."""
+        """Re-activate a lost track and refresh appearance features.
+
+        Args:
+            new_track (STrack): Detection used to revive this track.
+            frame_id (int): Current frame id.
+            new_id (bool): If True, assign a fresh track id instead of reusing the old one.
+        """
         if new_track.curr_feat is not None:
             self.update_features(new_track.curr_feat, new_track.score)
         super().re_activate(new_track, frame_id, new_id)
 
     @staticmethod
     def multi_gmc(stracks: list[DeepOCSortTrack], H: np.ndarray = np.eye(2, 3)) -> None:
-        """Apply GMC correctly for XYAH state by rotating `(x, y)` and `(vx, vy)` only, not `(a, h)`."""
+        """Apply global motion compensation correctly for the XYAH Kalman state.
+
+        The standard `multi_gmc` helper from `utils.stracks` would rotate `(a, h)` along with
+        `(x, y)`, which is wrong for an aspect-ratio dim. This variant only rotates the
+        position `(x, y)` and the velocity `(vx, vy)` blocks, leaves `(a, h)` and `(va, vh)`
+        untouched, and also rotates the stored `last_observation` so OCR/ORU stay consistent.
+
+        Args:
+            stracks (list[DeepOCSortTrack]): Tracks to warp in place.
+            H (np.ndarray): 2x3 affine homography mapping the previous frame to the current one.
+        """
         if not stracks:
             return
         multi_mean = np.asarray([st.mean.copy() for st in stracks])
