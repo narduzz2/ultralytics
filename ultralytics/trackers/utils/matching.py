@@ -129,6 +129,57 @@ def embedding_distance(tracks: list, detections: list, metric: str = "cosine") -
     return cost_matrix
 
 
+def iou_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
+    """Compute the pairwise IoU similarity matrix between two sets of xyxy boxes.
+
+    Args:
+        boxes_a (np.ndarray): Array of shape `(N, 4)` in `(x1, y1, x2, y2)` format.
+        boxes_b (np.ndarray): Array of shape `(M, 4)` in the same format.
+
+    Returns:
+        (np.ndarray): Float32 `(N, M)` IoU matrix; an empty `(N, M)` array if either input is empty.
+
+    Examples:
+        >>> ious = iou_matrix(np.array([[0, 0, 10, 10]]), np.array([[5, 5, 15, 15]]))
+    """
+    if boxes_a.size == 0 or boxes_b.size == 0:
+        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
+    a = boxes_a[:, None, :]
+    b = boxes_b[None, :, :]
+    inter_w = np.clip(np.minimum(a[..., 2], b[..., 2]) - np.maximum(a[..., 0], b[..., 0]), 0, None)
+    inter_h = np.clip(np.minimum(a[..., 3], b[..., 3]) - np.maximum(a[..., 1], b[..., 1]), 0, None)
+    inter = inter_w * inter_h
+    area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
+    area_b = (boxes_b[:, 2] - boxes_b[:, 0]) * (boxes_b[:, 3] - boxes_b[:, 1])
+    union = area_a[:, None] + area_b[None, :] - inter + 1e-9
+    return (inter / union).astype(np.float32)
+
+
+def coverage_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
+    """Compute the asymmetric coverage matrix `intersection(a, b) / area(a)`.
+
+    Preferred over IoU for occlusion detection: a small box hidden behind a large one has high
+    coverage from the small box's side but potentially low IoU.
+
+    Args:
+        boxes_a (np.ndarray): `(N, 4)` xyxy boxes — candidates for being covered.
+        boxes_b (np.ndarray): `(M, 4)` xyxy boxes — candidate occluders.
+
+    Returns:
+        (np.ndarray): Float32 `(N, M)` matrix where entry `[i, j]` equals
+            `intersection(a_i, b_j) / area(a_i)`.
+    """
+    if boxes_a.size == 0 or boxes_b.size == 0:
+        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
+    a = boxes_a[:, None, :]
+    b = boxes_b[None, :, :]
+    inter_w = np.clip(np.minimum(a[..., 2], b[..., 2]) - np.maximum(a[..., 0], b[..., 0]), 0, None)
+    inter_h = np.clip(np.minimum(a[..., 3], b[..., 3]) - np.maximum(a[..., 1], b[..., 1]), 0, None)
+    inter = inter_w * inter_h
+    area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
+    return (inter / (area_a[:, None] + 1e-9)).astype(np.float32)
+
+
 def fuse_score(cost_matrix: np.ndarray, detections: list) -> np.ndarray:
     """Fuse cost matrix with detection scores to produce a single cost matrix.
 
