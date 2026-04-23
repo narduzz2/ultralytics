@@ -1516,6 +1516,20 @@ def load_checkpoint(weight, device=None, inplace=True, fuse=False):
     args = {**DEFAULT_CFG_DICT, **(ckpt.get("train_args", {}))}  # combine model and default args, preferring model args
     model = (ckpt.get("ema") or ckpt["model"]).float()  # FP32 model
 
+    for name, t in model.state_dict().items():
+        if not t.dtype.is_floating_point or torch.isfinite(t).all():
+            continue
+        mask = ~torch.isfinite(t)
+        n_bad = int(mask.sum())
+        if name.endswith("running_var"):
+            t[mask] = 1.0
+        elif name.endswith("running_mean"):
+            t[mask] = 0.0
+        else:
+            t.clamp_(-65504, 65504)
+            t[torch.isnan(t)] = 0.0
+        LOGGER.warning(f"Sanitized {n_bad} non-finite value(s) in {name}")
+
     # Model compatibility updates
     model.args = args  # attach args to model
     model.pt_path = str(weight)  # attach *.pt file path to model as string (avoids WindowsPath pickle issues)
