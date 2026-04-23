@@ -435,6 +435,37 @@ class YOLOE(Model):
 
 
 
+class AnomalyValidator(yolo.detect.DetectionValidator):
+    """Validator for YOLOAnomaly models.
+
+    For end2end models (e.g. yoloe26n), non_max_suppression skips IoU-based NMS
+    and only confidence-filters the top-k output, leaving overlapping boxes.
+    This subclass applies real torchvision IoU NMS after confidence filtering.
+    """
+
+    def postprocess(self, preds):
+        """Apply real IoU NMS for end2end models, then delegate."""
+        if isinstance(preds, (tuple, list)):
+            preds = preds[0]
+
+        if self.end2end:
+            import torchvision
+
+            output = []
+            for pred in preds:  # pred: [N, 6] = [x1, y1, x2, y2, score, cls]
+                mask = pred[:, 4] > self.args.conf
+                pred = pred[mask]
+                if len(pred) == 0:
+                    output.append({"bboxes": pred[:, :4], "conf": pred[:, 4], "cls": pred[:, 5], "extra": pred[:, 6:]})
+                    continue
+                keep = torchvision.ops.nms(pred[:, :4].float(), pred[:, 4].float(), self.args.iou)
+                pred = pred[keep[: self.args.max_det]]
+                output.append({"bboxes": pred[:, :4], "conf": pred[:, 4], "cls": pred[:, 5], "extra": pred[:, 6:]})
+            return output
+
+        return super().postprocess(preds)
+
+
 class AnomalyPredictor(yolo.detect.DetectionPredictor):
     """Predictor for YOLOAnomaly models.
 
@@ -443,11 +474,29 @@ class AnomalyPredictor(yolo.detect.DetectionPredictor):
     """
 
     def postprocess(self, preds, img, orig_imgs, **kwargs):
-        """Unpack model output tuple then delegate to DetectionPredictor.postprocess."""
+        """Unpack model output tuple then apply IoU NMS for end2end models."""
         # AnomalyDetection.forward() returns (y_tensor, preds_dict) in non-export mode.
-        # y_tensor is already top-k selected by Detect.postprocess (end2end path).
+        # y_tensor is already top-k selected by AnomalyDetection.postprocess (end2end path).
         if isinstance(preds, (tuple, list)):
             preds = preds[0]
+
+        # For end2end models (e.g. yoloe26n), non_max_suppression skips IoU-based NMS and
+        # only confidence-filters the top-k output, leaving overlapping boxes.  Apply real
+        # NMS here so duplicates are removed before results are constructed.
+        if getattr(self.model, "end2end", False):
+            import torchvision
+
+            output = []
+            for pred in preds:  # pred: [N, 6] = [x1, y1, x2, y2, score, cls]
+                mask = pred[:, 4] > self.args.conf
+                pred = pred[mask]
+                if len(pred) == 0:
+                    output.append(pred)
+                    continue
+                keep = torchvision.ops.nms(pred[:, :4].float(), pred[:, 4].float(), self.args.iou)
+                output.append(pred[keep[: self.args.max_det]])
+            return self.construct_results(output, img, orig_imgs, **kwargs)
+
         return super().postprocess(preds, img, orig_imgs, **kwargs)
 
 
@@ -517,14 +566,14 @@ class YOLOAnomaly(Model):
             "detect": {
                 "model": DetectionModel,
                 "predictor": AnomalyPredictor,
-                "validator": yolo.detect.DetectionValidator,
+                "validator": AnomalyValidator,
             },
             # Segmentation checkpoints are supported as backbones; anomaly output is
             # always detection-shaped (boxes only), so we reuse AnomalyPredictor.
             "segment": {
                 "model": SegmentationModel,
                 "predictor": AnomalyPredictor,
-                "validator": yolo.detect.DetectionValidator,
+                "validator": AnomalyValidator,
             },
         }
 
