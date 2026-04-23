@@ -34,14 +34,21 @@ def get_mvtec_yolo_data(category,data_root="/Users/louis/workspace/ultra_louis_w
 	train_im_dir = f"{data_root}/{category}/train/good"
 	test_im_dir = f"{data_root}/{category}/test"
 	test_good_im_dir = f"{test_im_dir}/good"
+	train_im_list=collect_images(train_im_dir,recursively=True)
+	test_im_list=collect_images(test_im_dir,recursively=True)
+	test_good_im_list=collect_images(test_good_im_dir,recursively=True)
 
+	test_anomaly_im_list = [im for im in test_im_list if im not in test_good_im_list]	
 
 
 	return dict(
 		train_im_dir=train_im_dir,
-		train_im_list=collect_images(train_im_dir,recursively=True),
-		test_im_list=collect_images(test_im_dir,recursively=True),
-		test_good_im_list=collect_images(test_good_im_dir,recursively=True),	
+		test_im_dir=test_im_dir,
+		train_im_list=train_im_list,
+		test_im_list=test_im_list,
+		test_good_im_list=test_good_im_list,
+		test_anomaly_im_list=test_anomaly_im_list,
+
 		data_yaml=data_root+f"/{category}.yaml",
 	)
 
@@ -67,9 +74,9 @@ def build_ad_model(base_weight, data_config, model_arg, anomaly_arg, category="s
 		print(f"Loaded anomaly model from {saved_model_path}, is_configured={model.is_configured}")
 	return model
 
-def iter_predict(data_config, model, model_arg):
-		test_imgs = collect_images(data_config["test_im_dir"])
-		assert test_imgs, f"No test images found under {data_config['test_im_dir']}"
+def iter_predict(data_config, model, model_arg,):
+		test_imgs = data_config["test_anomaly_im_list"]
+
 
 
 		for test_img in test_imgs[20:]:  # warmup / benchmark
@@ -121,39 +128,45 @@ def save_metrics_to_csv(metrics, save_path="./runs/temp/metrics.csv"):
 
 def main():
 	# ── Config ────────────────────────────────────────────────────────────
+	categories=MVTEC_CATEGORIES
 
-	for category in MVTEC_CATEGORIES[4:]:
+	categories=["wood"]
+
+
+	for category in categories:
 		data_config=get_mvtec_yolo_data(category)
 
 		base_model = "yoloe-11m-seg.pt"
-
-
+		# base_model = "yoloe-26m-seg.pt"
+		base_model="yolo26l.pt"
 		model_arg, anomaly_arg = get_arguments(category)
 
-		model = build_ad_model(base_model, data_config, model_arg, anomaly_arg, category=category, replace_model=True)
+		model = build_ad_model(base_model, data_config, model_arg, anomaly_arg, category=category, replace_model=False)
 
 		model.set_ad_params(**anomaly_arg)
 
-		# --- val -------------------
+		# --- val: test end2end=True vs end2end=False -------------------
+		if True:
+			for e2e in [True, False]:
+				model.model.model[-1].end2end = e2e
+				tag = f"e2e={e2e}"
+				res = model.val(data=data_config["data_yaml"], split="val", plots=False, batch=1, **model_arg)
 
-		res=model.val(data=data_config["data_yaml"],split="val",plots=True,batch=1,visualize=True,**model_arg)
-
-		box = res.box  # ultralytics Metric object
-		metrics = dict(
-			category=category,
-			base_model=base_model,
-			precision=float(box.mp),
-			recall=float(box.mr),
-			ap50=float(box.map50),
-			ap50_95=float(box.map),
-		)
-
-		save_metrics_to_csv(metrics, save_path=f"./runs/temp/metrics.csv")
-
-		del model
+				box = res.box  # ultralytics Metric object
+				metrics = dict(
+					category=category,
+					base_model=base_model,
+					end2end=e2e,
+					precision=float(box.mp),
+					recall=float(box.mr),
+					ap50=float(box.map50),
+					ap50_95=float(box.map),
+				)
+				print(f"[{tag}] P={box.mp:.3f} R={box.mr:.3f} mAP50={box.map50:.3f} mAP50-95={box.map:.3f}")
+				save_metrics_to_csv(metrics, save_path=f"./runs/temp/metrics_e2e_test.csv")
 		# ── Inference ─────────────────────────────────────────────────────────
-	if False:
-		iter_predict(data_config, model, model_arg)
+		if False:
+			iter_predict(data_config, model, model_arg)
 
 
 
