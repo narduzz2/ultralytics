@@ -10,6 +10,7 @@ import numpy as np
 from .basetrack import TrackState
 from .byte_tracker import STrack, BYTETracker
 from .utils import matching
+from .utils.stracks import merge_track_pools
 
 
 class FastSTrack(STrack):
@@ -90,55 +91,6 @@ class FastSTrack(STrack):
         """
         super().update(new_track, frame_id)
         self._push_history()
-
-
-def _bbox_iou_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
-    """Compute the pairwise IoU matrix between two sets of xyxy boxes.
-
-    Args:
-        boxes_a (np.ndarray): Array of shape ``(N, 4)`` in ``(x1, y1, x2, y2)`` format.
-        boxes_b (np.ndarray): Array of shape ``(M, 4)`` in the same format.
-
-    Returns:
-        (np.ndarray): Float32 ``(N, M)`` IoU matrix, or an empty ``(N, M)`` array if either input is empty.
-    """
-    if boxes_a.size == 0 or boxes_b.size == 0:
-        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
-    a = boxes_a[:, None, :]
-    b = boxes_b[None, :, :]
-    inter_w = np.clip(np.minimum(a[..., 2], b[..., 2]) - np.maximum(a[..., 0], b[..., 0]), 0, None)
-    inter_h = np.clip(np.minimum(a[..., 3], b[..., 3]) - np.maximum(a[..., 1], b[..., 1]), 0, None)
-    inter = inter_w * inter_h
-    area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
-    area_b = (boxes_b[:, 2] - boxes_b[:, 0]) * (boxes_b[:, 3] - boxes_b[:, 1])
-    union = area_a[:, None] + area_b[None, :] - inter + 1e-9
-    return (inter / union).astype(np.float32)
-
-
-def _coverage_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
-    """Compute the fraction of each ``boxes_a`` area covered by each ``boxes_b`` box.
-
-    This is an asymmetric measure (``intersection / area(a)``), preferred over IoU for occlusion
-    detection because a small track hidden behind a large one has high coverage from the small
-    track's side but potentially low IoU.
-
-    Args:
-        boxes_a (np.ndarray): ``(N, 4)`` xyxy boxes — candidates for being occluded.
-        boxes_b (np.ndarray): ``(M, 4)`` xyxy boxes — candidate occluders.
-
-    Returns:
-        (np.ndarray): Float32 ``(N, M)`` matrix where entry ``[i, j]`` equals
-            ``intersection(a_i, b_j) / area(a_i)``.
-    """
-    if boxes_a.size == 0 or boxes_b.size == 0:
-        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
-    a = boxes_a[:, None, :]
-    b = boxes_b[None, :, :]
-    inter_w = np.clip(np.minimum(a[..., 2], b[..., 2]) - np.maximum(a[..., 0], b[..., 0]), 0, None)
-    inter_h = np.clip(np.minimum(a[..., 3], b[..., 3]) - np.maximum(a[..., 1], b[..., 1]), 0, None)
-    inter = inter_w * inter_h
-    area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
-    return (inter / (area_a[:, None] + 1e-9)).astype(np.float32)
 
 
 class FASTTracker(BYTETracker):
@@ -325,7 +277,7 @@ class FASTTracker(BYTETracker):
                 continue
             if suppress_on and active_boxes:
                 stacked = np.asarray(active_boxes, dtype=np.float32)
-                if _bbox_iou_matrix(det.xyxy[None, :], stacked).max() >= self.init_iou_suppress:
+                if matching.iou_matrix(det.xyxy[None, :], stacked).max() >= self.init_iou_suppress:
                     continue
             det.activate(self.kalman_filter, self.frame_id)
             activated_stracks.append(det)
@@ -340,17 +292,7 @@ class FASTTracker(BYTETracker):
                 track.mark_removed()
                 removed_stracks.append(track)
 
-        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated_stracks)
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.tracked_stracks)
-        self.lost_stracks.extend(lost_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.removed_stracks)
-        self.tracked_stracks, self.lost_stracks = self.remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
-        self.removed_stracks.extend(removed_stracks)
-        if len(self.removed_stracks) > 1000:
-            self.removed_stracks = self.removed_stracks[-1000:]
-
+        merge_track_pools(self, activated_stracks, refind_stracks, lost_stracks, removed_stracks)
         return np.asarray([x.result for x in self.tracked_stracks if x.is_activated], dtype=np.float32)
 
     def _handle_occlusions(self, r_tracked, u_track, activated_stracks, lost_stracks):
@@ -389,7 +331,7 @@ class FASTTracker(BYTETracker):
         )
 
         if active_boxes.size and unmatched_boxes.size:
-            cov = _coverage_matrix(unmatched_boxes, active_boxes)  # (U, A)
+            cov = matching.coverage_matrix(unmatched_boxes, active_boxes)  # (U, A)
             # Avoid self-match: zero out columns that correspond to the same track id.
             unm_ids = np.asarray([t.track_id for t in unmatched])
             same = unm_ids[:, None] == active_ids[None, :]

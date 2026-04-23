@@ -26,7 +26,8 @@ from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYWH
-from .utils.stracks import joint_stracks, multi_gmc, remove_duplicate_stracks, sub_stracks
+from .utils.matching import iou_matrix
+from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc, remove_duplicate_stracks, sub_stracks
 
 # Corner index arrays for angle-distance vectorization: LT, LB, RT, RB of an (x1,y1,x2,y2) box
 _CORNER_DX_IDX = np.array([0, 0, 2, 2])
@@ -59,20 +60,6 @@ def _nsa_kalman_update(
     return new_mean, new_cov
 
 
-def _bbox_overlaps(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Vectorized IoU between two (N,4) and (M,4) box sets in xyxy format; returns (N,M)."""
-    if len(a) == 0 or len(b) == 0:
-        return np.zeros((len(a), len(b)), dtype=np.float64)
-    x1 = np.maximum(a[:, 0:1], b[:, 0:1].T)
-    y1 = np.maximum(a[:, 1:2], b[:, 1:2].T)
-    x2 = np.minimum(a[:, 2:3], b[:, 2:3].T)
-    y2 = np.minimum(a[:, 3:4], b[:, 3:4].T)
-    inter = np.maximum(0, x2 - x1) * np.maximum(0, y2 - y1)
-    area_a = (a[:, 2] - a[:, 0]) * (a[:, 3] - a[:, 1])
-    area_b = (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
-    return inter / (area_a[:, None] + area_b[None, :] - inter + 1e-9)
-
-
 def _hmiou_distance(a_tracks: list, b_tracks: list) -> tuple[np.ndarray, np.ndarray]:
     """HMIoU = HIoU * IoU, where HIoU is vertical-overlap / vertical-union. Returns (iou_sim, 1-HMIoU).
 
@@ -84,7 +71,7 @@ def _hmiou_distance(a_tracks: list, b_tracks: list) -> tuple[np.ndarray, np.ndar
         return np.zeros((n, m), dtype=np.float64), np.ones((n, m), dtype=np.float64)
     a = np.ascontiguousarray([t.xyxy for t in a_tracks], dtype=np.float64)
     b = np.ascontiguousarray([t.xyxy for t in b_tracks], dtype=np.float64)
-    iou_sim = _bbox_overlaps(a, b)
+    iou_sim = iou_matrix(a, b)
     h_over = np.minimum(a[:, 3:4], b[:, 3:4].T) - np.maximum(a[:, 1:2], b[:, 1:2].T)
     h_union = np.maximum(a[:, 3:4], b[:, 3:4].T) - np.minimum(a[:, 1:2], b[:, 1:2].T)
     h_iou = np.clip(h_over / (h_union + 1e-9), 0, 1)
@@ -160,7 +147,7 @@ def _track_aware_nms(tracks: list, dets: list, tai_thr: float, init_thr: float) 
     if len(tracks) + len(dets) < 2:
         return allow
     boxes = np.ascontiguousarray([o.xyxy for o in tracks + dets], dtype=np.float64)
-    iou = _bbox_overlaps(boxes, boxes)
+    iou = iou_matrix(boxes, boxes)
     nt = len(tracks)
     for i in range(len(dets)):
         if not allow[i]:
@@ -646,18 +633,7 @@ class TRACKTRACK:
                 t.mark_removed()
                 removed.append(t)
 
-        # Bookkeeping
-        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated)
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.tracked_stracks)
-        self.lost_stracks.extend(lost)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.removed_stracks)
-        self.tracked_stracks, self.lost_stracks = self.remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
-        self.removed_stracks.extend(removed)
-        if len(self.removed_stracks) > 1000:
-            self.removed_stracks = self.removed_stracks[-1000:]
-
+        merge_track_pools(self, activated, refind, lost, removed)
         return np.asarray(
             [t.result for t in self.tracked_stracks if t.is_activated and t.frame_id == self.frame_id],
             dtype=np.float32,

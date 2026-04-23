@@ -11,7 +11,7 @@ from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
 from .utils import matching
 from .utils.kalman_filter import KalmanFilterXYAH
-from .utils.stracks import joint_stracks, multi_gmc, remove_duplicate_stracks, sub_stracks
+from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc, remove_duplicate_stracks, sub_stracks
 
 
 class STrack(BaseTrack):
@@ -365,17 +365,7 @@ class BYTETracker:
                 track.mark_removed()
                 removed_stracks.append(track)
 
-        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated_stracks)
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.tracked_stracks)
-        self.lost_stracks.extend(lost_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.removed_stracks)
-        self.tracked_stracks, self.lost_stracks = self.remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
-        self.removed_stracks.extend(removed_stracks)
-        if len(self.removed_stracks) > 1000:
-            self.removed_stracks = self.removed_stracks[-1000:]  # clip removed stracks to 1000 maximum
-
+        merge_track_pools(self, activated_stracks, refind_stracks, lost_stracks, removed_stracks)
         return np.asarray([x.result for x in self.tracked_stracks if x.is_activated], dtype=np.float32)
 
     def get_kalmanfilter(self) -> KalmanFilterXYAH:

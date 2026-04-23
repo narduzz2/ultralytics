@@ -12,6 +12,7 @@ from .oc_sort import OCSORT, OCSortTrack
 from .utils import matching
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYAH
+from .utils.stracks import merge_track_pools
 
 
 class DeepOCSortTrack(OCSortTrack):
@@ -343,21 +344,11 @@ class DeepOCSORT(OCSORT):
 
         # Stage 5: Update state
         for track in self.lost_stracks:
-            if self.frame_id - track.end_frame > self.max_time_lost:
+            if self.frame_id - track.end_frame > self.max_frames_lost:
                 track.mark_removed()
                 removed_stracks.append(track)
 
-        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated_stracks)
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.tracked_stracks)
-        self.lost_stracks.extend(lost_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.removed_stracks)
-        self.tracked_stracks, self.lost_stracks = self.remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
-        self.removed_stracks.extend(removed_stracks)
-        if len(self.removed_stracks) > 1000:
-            self.removed_stracks = self.removed_stracks[-1000:]
-
+        merge_track_pools(self, activated_stracks, refind_stracks, lost_stracks, removed_stracks)
         return np.asarray([x.result for x in self.tracked_stracks if x.is_activated], dtype=np.float32)
 
     def reset(self):
