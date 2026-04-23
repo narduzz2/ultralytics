@@ -781,6 +781,7 @@ class YOLOAnomaly(Model):
         active_layers: list[int] | None = None,
         auto_temperature: bool | None = None,
         calibration_interval: int | None = None,
+        em_iters: int | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters and optionally switch mode.
 
@@ -796,6 +797,7 @@ class YOLOAnomaly(Model):
                                             When True (default), β is derived from the 90th-percentile
                                             cosine similarity once the bank has enough features.
             calibration_interval (int | None): Re-calibrate every N support images (0 = calibrate once only).
+            em_iters (int | None): EM iteration rounds during bank construction (1=single pass, default).
         """
         assert isinstance(self.model, YOLOAnomalyModel), "Call setup() before set_ad_params()."
         head = self.model.model[-1]
@@ -808,6 +810,7 @@ class YOLOAnomaly(Model):
             active_layers=active_layers,
             auto_temperature=auto_temperature,
             calibration_interval=calibration_interval,
+            em_iters=em_iters,
         )
         if mode is not None:
             self.set_mode(mode)

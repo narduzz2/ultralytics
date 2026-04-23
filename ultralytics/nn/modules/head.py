@@ -1826,6 +1826,11 @@ class ADMBHead(nn.Module):
         self._calibrated = False            # whether the first calibration has already run
         self._calibration_image_count = 0   # total support images processed so far
 
+        # ── EM-style iterative bank construction ──────────────────────────────
+        self.em_iters = 1  # total E-step passes; 1 = single-pass (current behaviour);
+                           # >1 = after E-step₁ run M-step (calibrate β) then E-step₂ … until
+                           # no new features are added (convergence) or em_iters exhausted.
+
 
     # ── configuration ────────────────────────────────────────────────────────
 
@@ -1977,54 +1982,91 @@ class ADMBHead(nn.Module):
         total_added = 0
         keep_flags = torch.zeros(H * W, dtype=torch.bool, device=cls_feat.device)
 
+        # ── pre-compute and cache all normalised feature maps ─────────────────
+        # Saved on the Python stack; no attribute stored → no persistent memory leak.
+        # Cost: B × H*W × C floats (e.g. 4 × 6400 × 256 ≈ 26 MB per layer — acceptable).
+        all_normed: list[torch.Tensor] = []
         for b in range(B):
-            # Normalize features for this image: [H*W, C]
             feats_b = cls_feat[b].permute(1, 2, 0).reshape(H * W, self.feature_dim).detach()
-            normed_b = F.normalize(feats_b, p=2, dim=1)
+            all_normed.append(F.normalize(feats_b, p=2, dim=1))  # [H*W, C]
 
-            # Initial scoring to obtain the candidate pool
-            init_scores = self._anomaly_scores(normed_b, mem=mem)  # [H*W]
-            candidate_idx = (init_scores > accumulate_thresh).nonzero(as_tuple=True)[0]
-            if candidate_idx.numel() == 0:
-                continue
+        def _run_obma_pass(normed_list, mem_in, added_in_bank_before):
+            """One E-step: iterate over all images, add novel features to mem_in.
 
-            # Process most-novel candidates first
-            sort_order = init_scores[candidate_idx].argsort(descending=True)
-            candidate_idx = candidate_idx[sort_order]
-            cand_feats = normed_b[candidate_idx]  # [K, C]
+            Returns (mem_out, added_this_pass, keep_flags_updated).
+            keep_flags is only updated from image-0 of the first pass so that
+            the returned visualisation corresponds to the initial batch result.
+            """
+            mem = mem_in
+            added_pass = 0
+            for b, normed_b in enumerate(normed_list):
+                scores = self._anomaly_scores(normed_b, mem=mem)  # [H*W]
+                cand_idx = (scores > accumulate_thresh).nonzero(as_tuple=True)[0]
+                if cand_idx.numel() == 0:
+                    continue
+                sort_order = scores[cand_idx].argsort(descending=True)
+                cand_idx = cand_idx[sort_order]
+                cand_feats = normed_b[cand_idx]
+                for i in range(cand_feats.shape[0]):
+                    feat = cand_feats[i : i + 1]
+                    if self._anomaly_scores(feat, mem=mem).item() > accumulate_thresh:
+                        mem = torch.cat((mem, feat.to(mem.device, dtype=mem.dtype)), dim=0)
+                        added_pass += 1
+                        # Track keep_flags only for image-0 on pass-0
+                        if b == 0 and added_in_bank_before == 0:
+                            keep_flags[cand_idx[i]] = True
+            return mem, added_pass
 
-            added_this_image = 0
-            for i in range(cand_feats.shape[0]):
-                feat = cand_feats[i : i + 1]  # [1, C]
-                # Re-score against the live bank (includes features added this image)
-                score = self._anomaly_scores(feat, mem=mem).item()
-                if score > accumulate_thresh:
-                    mem = torch.cat((mem, feat.to(mem.device, dtype=mem.dtype)), dim=0)
-                    added_this_image += 1
-                    if b == 0:
-                        keep_flags[candidate_idx[i]] = True
+        # ── Pass 0 (initial E-step, identical to original OBMA) ──────────────
+        bank_before = mem.shape[0]
+        mem, added = _run_obma_pass(all_normed, mem, 0)
+        total_added += added
 
-            total_added += added_this_image
+        # ── auto-temperature calibration + image counter ─────────────────────
+        # Count all B images after the first pass (mirrors original per-image counting).
+        self._calibration_image_count += B
+        if self.auto_temperature and mem.shape[0] >= self.min_calibration_bank_size:
+            do_calibrate = (
+                not self._calibrated
+                or (self.calibration_interval > 0
+                    and self._calibration_image_count % self.calibration_interval == 0)
+            )
+            if do_calibrate:
+                # Use a flat view of all batch features for a representative sample.
+                all_normed_cat = torch.cat(all_normed, dim=0)  # [B*H*W, C]
+                self._calibrate_temperature(all_normed_cat, mem)
+                self._calibrated = True
 
-            # ── auto temperature calibration after each image ──────────────
-            self._calibration_image_count += 1
+        # ── EM iterations (additional E↔M rounds) ────────────────────────────
+        em_iters_run = 0  # number of additional EM rounds that actually ran (excluding pass-0)
+        for em_t in range(1, self.em_iters):
+            # M-step: recalibrate β if auto_temperature is on
             if self.auto_temperature and mem.shape[0] >= self.min_calibration_bank_size:
-                do_calibrate = (
-                    not self._calibrated
-                    or (self.calibration_interval > 0
-                        and self._calibration_image_count % self.calibration_interval == 0)
-                )
-                if do_calibrate:
-                    self._calibrate_temperature(normed_b, mem)
-                    self._calibrated = True
+                all_normed_cat = torch.cat(all_normed, dim=0)
+                self._calibrate_temperature(all_normed_cat, mem)
+
+            # E-step: re-score with updated β; only positions NOT yet in bank can be added.
+            # Pass bank_before=non-zero so keep_flags won't be overwritten by later passes.
+            mem, added_em = _run_obma_pass(all_normed, mem, added)
+            total_added += added_em
+            em_iters_run += 1
+            LOGGER.debug(
+                "OBMA-EM iter %d/%d: added=%d mem_size=%d temperature=%.3f",
+                em_t, self.em_iters - 1, added_em, mem.shape[0], self.temperature,
+            )
+            if added_em == 0:
+                LOGGER.debug("OBMA-EM: converged at iter %d.", em_t)
+                break
 
         self.memory_bank = mem
         LOGGER.info(
-            "OBMA: added=%d/%d keep=%.1f%% mem_size=%d temperature=%.3f",
-            total_added, B * H * W,
+            "OBMA: total_added=%d keep=%.1f%% mem_size=%d temperature=%.3f em_extra_iters=%d/%d",
+            total_added,
             100.0 * keep_flags.sum() / max(H * W, 1),
             self.memory_bank.shape[0],
             self.temperature,
+            em_iters_run,          # how many extra EM rounds actually ran (0 when em_iters=1)
+            max(0, self.em_iters - 1),  # how many were requested
         )
         return keep_flags
 
@@ -2285,6 +2327,7 @@ class AnomalyDetection(Detect):
         active_layers: list[int] | None = None,
         auto_temperature: bool | None = None,
         calibration_interval: int | None = None,
+        em_iters: int | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters.
 
@@ -2303,6 +2346,11 @@ class AnomalyDetection(Detect):
                                             cosine similarity in the bank once it reaches
                                             ``min_calibration_bank_size`` features.
             calibration_interval (int | None): Re-calibrate every N support images (0 = once only).
+            em_iters (int | None): Number of EM-style E↔M iteration rounds during bank construction.
+                                   1 = single pass (default, current behaviour).
+                                   >1 = after the initial OBMA E-step, re-calibrate β (M-step) then
+                                   re-score all features (E-step) until no new features are added
+                                   or em_iters rounds are exhausted.
         """
         if ad_conf is not None:
             self.ad_conf = ad_conf
@@ -2327,6 +2375,9 @@ class AnomalyDetection(Detect):
         if calibration_interval is not None and self.adhead is not None:
             for h in self.adhead:
                 h.calibration_interval = calibration_interval
+        if em_iters is not None and self.adhead is not None:
+            for h in self.adhead:
+                h.em_iters = em_iters
 
 
     def _get_decode_boxes(self, x):

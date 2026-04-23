@@ -144,11 +144,13 @@ def main():
 
 		model = build_ad_model(base_model, data_config, model_arg, anomaly_arg, category=category, replace_model=True)
 
+
 		# anomaly_arg=dict(accumulate_thresh=0.1,score_filter_kernel=0.1,ad_conf=0.4, ad_max_det=9, mode="anomaly")
 
 
 		model.set_ad_params(**anomaly_arg)
-
+		# model.set_ad_params(auto_temperature=True, calibration_interval=10)
+		model.set_ad_params(em_iters=5, auto_temperature=True)
 		# --- val -------------------
 		if True:
 			model.set_ad_params(active_layers=[1, 2])
