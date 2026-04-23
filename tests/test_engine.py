@@ -206,6 +206,7 @@ def test_train_reuses_loaded_checkpoint_model(monkeypatch):
 def test_non_finite_value_handling():
     """Test sanitization of non-finite values in model parameters and EMA update skipping."""
     import torch.nn as nn
+
     from ultralytics.models.yolo import detect
     from ultralytics.utils.torch_utils import ModelEMA
 
