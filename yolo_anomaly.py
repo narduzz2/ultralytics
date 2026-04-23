@@ -64,7 +64,7 @@ def build_ad_model(base_weight, data_config, model_arg, anomaly_arg, category="s
 		os.makedirs("./runs/temp", exist_ok=True)
 		model = YOLOAnomaly(base_weight)
 		model.setup(names=["anomaly"])
-		model.set_ad_params(**anomaly_arg) # set ad args before loading support set 
+		model.set_ad_params(**anomaly_arg)
 		support_images = collect_images(data_config["train_im_dir"])
 		model.load_support_set(support_images, imgsz=model_arg["imgsz"])
 		model.save(saved_model_path)
@@ -94,16 +94,17 @@ def iter_predict(data_config, model, model_arg,):
 
 def get_arguments(category="screw"):
 
-	if category =="leather":
-		model_arg = dict(conf=0.001, iou=0.001, max_det=1000, imgsz=640,single_cls=True,rect=False)
-		anomaly_arg=dict(accumulate_thresh=0.1,score_filter_kernel=0.1,ad_conf=0.5, ad_max_det=9, mode="anomaly")
+	# if category =="leather":
+	# 	model_arg = dict(conf=0.001, iou=0.001, max_det=1000, imgsz=640,single_cls=True,rect=False)
+	# 	anomaly_arg=dict(accumulate_thresh=0.1,score_filter_kernel=0.1,ad_conf=0.5, ad_max_det=9, mode="anomaly")
 
-	if category =="grid":
-		model_arg = dict(conf=0.001, iou=0.001, max_det=1000, imgsz=640,single_cls=True,rect=False)
-		anomaly_arg=dict(accumulate_thresh=0.2,score_filter_kernel=0.1,ad_conf=0.4, ad_max_det=9, mode="anomaly")	
+	# if category =="grid":
+	# 	model_arg = dict(conf=0.001, iou=0.001, max_det=1000, imgsz=640,single_cls=True,rect=False)
+	# 	anomaly_arg=dict(accumulate_thresh=0.2,score_filter_kernel=0.1,ad_conf=0.4, ad_max_det=9, mode="anomaly")	
 
 	model_arg = dict(conf=0.001, iou=0.001, max_det=1000, imgsz=640,single_cls=True,rect=False)
-	anomaly_arg=dict(accumulate_thresh=0.2,score_filter_kernel=0.1,ad_conf=0.4, ad_max_det=9, mode="anomaly")
+	anomaly_arg=dict(accumulate_thresh=0.3,score_filter_kernel=0.1,ad_conf=0.4, ad_max_det=9, mode="anomaly",
+					 active_layers=[1, 2])  # 0=P3(fine), 1=P4, 2=P5(coarse) — only build/use selected layers
 	
 	return model_arg, anomaly_arg
 
@@ -130,7 +131,7 @@ def main():
 	# ── Config ────────────────────────────────────────────────────────────
 	categories=MVTEC_CATEGORIES
 
-	categories=["wood"]
+	# categories=["wood"]
 
 
 	for category in categories:
@@ -141,33 +142,33 @@ def main():
 		base_model="yolo26l.pt"
 		model_arg, anomaly_arg = get_arguments(category)
 
-		model = build_ad_model(base_model, data_config, model_arg, anomaly_arg, category=category, replace_model=False)
+		model = build_ad_model(base_model, data_config, model_arg, anomaly_arg, category=category, replace_model=True)
+
+		# anomaly_arg=dict(accumulate_thresh=0.1,score_filter_kernel=0.1,ad_conf=0.4, ad_max_det=9, mode="anomaly")
+
 
 		model.set_ad_params(**anomaly_arg)
 
-		# --- val: test end2end=True vs end2end=False -------------------
+		# --- val -------------------
 		if True:
-			for e2e in [True, False]:
-				model.model.model[-1].end2end = e2e
-				tag = f"e2e={e2e}"
-				res = model.val(data=data_config["data_yaml"], split="val", plots=False, batch=1, **model_arg)
-
-				box = res.box  # ultralytics Metric object
-				metrics = dict(
-					category=category,
-					base_model=base_model,
-					end2end=e2e,
-					precision=float(box.mp),
-					recall=float(box.mr),
-					ap50=float(box.map50),
-					ap50_95=float(box.map),
-				)
-				print(f"[{tag}] P={box.mp:.3f} R={box.mr:.3f} mAP50={box.map50:.3f} mAP50-95={box.map:.3f}")
-				save_metrics_to_csv(metrics, save_path=f"./runs/temp/metrics_e2e_test.csv")
+			model.set_ad_params(active_layers=[1, 2])
+			res = model.val(data=data_config["data_yaml"], split="val", plots=False, batch=1, **model_arg)
+			box = res.box
+			metrics = dict(
+				category=category,
+				base_model=base_model,
+				precision=float(box.mp),
+				recall=float(box.mr),
+				ap50=float(box.map50),
+				ap50_95=float(box.map),
+			)
+			print(f"P={box.mp:.3f} R={box.mr:.3f} mAP50={box.map50:.3f} mAP50-95={box.map:.3f}")
+			save_metrics_to_csv(metrics, save_path=f"./runs/temp/metrics_26l.csv")
 		# ── Inference ─────────────────────────────────────────────────────────
 		if False:
 			iter_predict(data_config, model, model_arg)
 
 
+if __name__ == "__main__":
 
-main()
+	main()

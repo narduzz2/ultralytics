@@ -1992,8 +1992,12 @@ class ADMBHead(nn.Module):
         B, C, H, W = cls_feat.shape
         if not self.enabled:
             nc = 1 if anomaly_mode else self.vocab_linear.out_features
-            empty_scores = torch.zeros(B, nc, 0, device=cls_feat.device, dtype=cls_feat.dtype)
-            empty_mask = torch.zeros(H * W, dtype=torch.bool, device=cls_feat.device)
+            # Export/dense (conf==0): return H*W zeros so output shape is fixed.
+            # Normal inference: return 0-width tensor (no proposals from disabled head).
+            k = H * W if conf == 0 else 0
+            empty_scores = torch.zeros(B, nc, k, device=cls_feat.device, dtype=cls_feat.dtype)
+            empty_mask = torch.ones(H * W, dtype=torch.bool, device=cls_feat.device) if conf == 0 \
+                else torch.zeros(H * W, dtype=torch.bool, device=cls_feat.device)
             return self.loc(loc_feat), empty_scores, empty_mask
 
         if self.feature_dim is None:
@@ -2021,18 +2025,30 @@ class ADMBHead(nn.Module):
                                                                                B, H, W, 
                                                                                self.accumulate_thresh)
 
-        # infer flow
-        mask = scores_hw > conf                                          # [H*W]
-        if anomaly_mode:
-            # Per-image logits: each image uses its own anomaly probability at the selected
-            # positions, NOT the shared batch-max score. This prevents a single anomalous
-            # image from contaminating normal images in the same batch with its high scores.
-            per_img_scores = scores_per_image[:, mask].clamp(1e-6, 1 - 1e-6)   # [B, k]
-            cls_scores = torch.log(per_img_scores / (1 - per_img_scores)).unsqueeze(1)  # [B, 1, k]
+        # infer flow — two paths:
+        #   conf == 0 (export/dense): return all H*W positions with real scores, no boolean indexing.
+        #     Fixed output shape [B, 1|nc, H*W] is required for ONNX. Downstream topk + predictor
+        #     conf filter handle selection. Mirrors the conf=0 pattern in LRPCHead/YOLOEDetect.
+        #   conf > 0 (normal inference): sparse boolean mask → variable-k output (fast, memory-efficient).
+        if conf == 0:
+            mask = torch.ones(H * W, dtype=torch.bool, device=cls_feat.device)
+            if anomaly_mode:
+                per_img_scores = scores_per_image.clamp(1e-6, 1 - 1e-6)                     # [B, H*W]
+                cls_scores = torch.log(per_img_scores / (1 - per_img_scores)).unsqueeze(1)  # [B, 1, H*W]
+            else:
+                cls_flat = cls_feat.flatten(2).transpose(-1, -2)                            # [B, H*W, C]
+                cls_scores = self.vocab_linear(cls_flat).transpose(-1, -2)                  # [B, nc, H*W]
         else:
-            cls_flat = cls_feat.flatten(2).transpose(-1, -2)                          # [B, H*W, C]
-            cls_scores = self.vocab_linear(cls_flat[:, mask]).transpose(-1, -2)       # [B, nc, k]
-
+            mask = scores_hw > conf                                                          # [H*W]
+            if anomaly_mode:
+                # Per-image logits: each image uses its own anomaly probability at the selected
+                # positions, NOT the shared batch-max score. This prevents a single anomalous
+                # image from contaminating normal images in the same batch with its high scores.
+                per_img_scores = scores_per_image[:, mask].clamp(1e-6, 1 - 1e-6)           # [B, k]
+                cls_scores = torch.log(per_img_scores / (1 - per_img_scores)).unsqueeze(1)  # [B, 1, k]
+            else:
+                cls_flat = cls_feat.flatten(2).transpose(-1, -2)                            # [B, H*W, C]
+                cls_scores = self.vocab_linear(cls_flat[:, mask]).transpose(-1, -2)         # [B, nc, k]
 
         return self.loc(loc_feat), cls_scores, mask
 
@@ -2265,12 +2281,15 @@ class AnomalyDetection(Detect):
         cv2 = self.one2one_cv2 if _has_e2e else self.cv2
         cv3 = self.one2one_cv3 if _has_e2e else self.cv3
 
+        # Export/dense mode: conf=0 routes each ADMBHead to the fixed-shape path (no boolean
+        # indexing), producing [B, 1|nc, H*W] scores. Downstream postprocess topk + predictor
+        # conf threshold do all selection. Mirrors YOLOEDetect.forward_lrpc (conf=0 on export).
+        ad_conf = 0 if (self.export and not self.dynamic) else self.ad_conf
+
         boxes, scores, index = [], [], []
         for i in range(self.nl):
             cls_feat = cv3[i](x[i])
             loc_feat = cv2[i](x[i])
-            ad_conf=self.ad_conf
-            # ad_conf=[0.3,1,1]
             box, score, idx = self.adhead[i](
                 cls_feat,
                 loc_feat,
@@ -2282,7 +2301,9 @@ class AnomalyDetection(Detect):
             index.append(idx)
 
         preds = dict(boxes=torch.cat(boxes, 2), scores=torch.cat(scores, 2), feats=x, index=torch.cat(index))
-        self.nc = preds["scores"].shape[1]
+        # Do not mutate self.nc from tensor shape during export — set_anomaly_mode() keeps it correct.
+        if not (self.export and not self.dynamic):
+            self.nc = preds["scores"].shape[1]
         y = self._inference(preds)
         if self.end2end:
             y = self.postprocess(y.permute(0, 2, 1))
