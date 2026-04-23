@@ -778,6 +778,7 @@ class YOLOAnomaly(Model):
         mode: str | None = None,
         accumulate_thresh: float | None = None,
         score_filter_kernel: int | None = None,
+        active_layers: list[int] | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters and optionally switch mode.
 
@@ -787,6 +788,8 @@ class YOLOAnomaly(Model):
             mode (str | None): If provided, switch to this mode ('anomaly' or 'detect').
             accumulate_thresh (float | None): Score threshold for OBMA memory-bank accumulation.
             score_filter_kernel (int | None): Kernel size for spatial mean filter (1=off, 3/5/7=smoothing).
+            active_layers (list[int] | None): Indices of detection layers to enable, e.g. [0, 1] uses only
+                                              the first two (P3+P4). None = all layers enabled.
         """
         assert isinstance(self.model, YOLOAnomalyModel), "Call setup() before set_ad_params()."
         head = self.model.model[-1]
@@ -796,6 +799,7 @@ class YOLOAnomaly(Model):
             ad_max_det=ad_max_det,
             accumulate_thresh=accumulate_thresh,
             score_filter_kernel=score_filter_kernel,
+            active_layers=active_layers,
         )
         if mode is not None:
             self.set_mode(mode)

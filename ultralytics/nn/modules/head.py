@@ -1816,6 +1816,7 @@ class ADMBHead(nn.Module):
         self.K = K
         self.accumulate_thresh = accumulate_thresh
         self.score_filter_kernel = score_filter_kernel
+        self.enabled = True  # set False to skip this head entirely (no accumulation, no proposals)
 
 
     # ── configuration ────────────────────────────────────────────────────────
@@ -1973,6 +1974,9 @@ class ADMBHead(nn.Module):
     def forward(self, cls_feat: torch.Tensor, loc_feat: torch.Tensor, conf: float = 0.5, anomaly_mode: bool = True) -> tuple:
         """Forward pass.
 
+        If ``self.enabled`` is False, skips accumulation and returns empty proposals
+        so this head contributes nothing to detections.
+
         Memory-bank building (``update=True``): accumulates features and returns
         dummy proposals (discarded by the caller).
 
@@ -1986,6 +1990,12 @@ class ADMBHead(nn.Module):
                     mask       bool [H*W])
         """
         B, C, H, W = cls_feat.shape
+        if not self.enabled:
+            nc = 1 if anomaly_mode else self.vocab_linear.out_features
+            empty_scores = torch.zeros(B, nc, 0, device=cls_feat.device, dtype=cls_feat.dtype)
+            empty_mask = torch.zeros(H * W, dtype=torch.bool, device=cls_feat.device)
+            return self.loc(loc_feat), empty_scores, empty_mask
+
         if self.feature_dim is None:
             self.feature_dim = C
 
@@ -2197,6 +2207,7 @@ class AnomalyDetection(Detect):
         ad_max_det: int | None = None,
         accumulate_thresh: float | None = None,
         score_filter_kernel: int | None = None,
+        active_layers: list[int] | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters.
 
@@ -2206,6 +2217,10 @@ class AnomalyDetection(Detect):
             accumulate_thresh (float | None): Score threshold for OBMA memory-bank accumulation.
             score_filter_kernel (int | None): Kernel size for spatial mean filter on score map.
                                               1 = disabled, 3/5/7 = increasing smoothing.
+            active_layers (list[int] | None): Indices of detection layers to enable, e.g. [0, 1] to use
+                                             only the first two (P3+P4) heads.  None = all enabled.
+                                             Head 0 = largest feature map (most detections),
+                                             head 2 = smallest (coarsest features).
         """
         if ad_conf is not None:
             self.ad_conf = ad_conf
@@ -2221,6 +2236,9 @@ class AnomalyDetection(Detect):
             if self.adhead is not None:
                 for h in self.adhead:
                     h.score_filter_kernel = score_filter_kernel
+        if active_layers is not None and self.adhead is not None:
+            for i, h in enumerate(self.adhead):
+                h.enabled = (i in active_layers)
 
 
     def _get_decode_boxes(self, x):
