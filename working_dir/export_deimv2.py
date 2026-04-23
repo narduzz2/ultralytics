@@ -6,13 +6,13 @@ from pathlib import Path
 
 import torch
 
-from ultralytics import RTDETRDEIM
+from ultralytics import RTDETR
 from ultralytics.engine.exporter import Exporter
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Export RTDETRDEIM with upstream deploy conversion.")
-    p.add_argument("weights", type=str, help="Path to RTDETRDEIM .pt checkpoint.")
+    p = argparse.ArgumentParser(description="Export RT-DETR-family checkpoints with optional deploy conversion.")
+    p.add_argument("weights", type=str, help="Path to RT-DETR-family .pt checkpoint.")
     p.add_argument("--format", type=str, default="onnx", help="Export format.")
     p.add_argument("--imgsz", type=int, default=640, help="Input image size.")
     p.add_argument("--opset", type=int, default=17, help="ONNX opset.")
@@ -243,20 +243,22 @@ def build_output_paths(args):
 
 
 def apply_export_eval_idx_override(deploy_model, export_eval_idx):
-    """Apply an export-only decoder eval_idx override before deploy conversion."""
-    decoder_modules = [m for m in deploy_model.modules() if hasattr(m, "convert_to_deploy") and hasattr(m, "eval_idx")]
+    """Apply an export-only decoder eval_idx override for RT-DETR-family models."""
+    head = deploy_model.model[-1] if hasattr(deploy_model, "model") and len(deploy_model.model) else None
+    decoder_modules = []
+    if head is not None and hasattr(head, "decoder") and hasattr(head.decoder, "eval_idx") and hasattr(head.decoder, "num_layers"):
+        decoder_modules.append(head.decoder)
+    else:
+        decoder_modules = [m for m in deploy_model.modules() if hasattr(m, "eval_idx") and hasattr(m, "num_layers")]
     if not decoder_modules:
-        raise RuntimeError("No deploy-convertible decoder with eval_idx was found in the export model.")
+        raise RuntimeError("No RT-DETR-family decoder with eval_idx/num_layers was found in the export model.")
 
     for decoder in decoder_modules:
-        num_layers = getattr(decoder, "num_layers", None)
-        if num_layers is None:
-            raise RuntimeError(f"Decoder {type(decoder).__name__} is missing num_layers; cannot validate eval_idx.")
+        num_layers = decoder.num_layers
         if not 0 <= export_eval_idx < num_layers:
             raise ValueError(f"--export-eval-idx must be in [0, {num_layers - 1}], got {export_eval_idx}.")
         decoder.eval_idx = export_eval_idx
 
-    head = deploy_model.model[-1] if hasattr(deploy_model, "model") and len(deploy_model.model) else None
     if head is not None and hasattr(head, "eval_idx"):
         head.eval_idx = export_eval_idx
 
@@ -267,15 +269,15 @@ def main():
     args = parse_args()
     onnx_path, engine_path = build_output_paths(args)
 
-    # Deploy conversion is destructive (trims DFINE decoder layers, swaps weighting_function);
-    # operate on a copy so the wrapper's live model is preserved.
-    deploy_model = deepcopy(RTDETRDEIM(args.weights).model).eval().float()
+    # Use a copied RT-DETR-family model so export-only overrides do not mutate the live wrapper model.
+    deploy_model = deepcopy(RTDETR(args.weights).model).eval().float()
     deploy_model.pt_path = str(onnx_path.with_suffix(".pt"))
     for p in deploy_model.parameters():
         p.requires_grad = False
     if args.export_eval_idx is not None:
         export_layers = apply_export_eval_idx_override(deploy_model, args.export_eval_idx)
         print(f"Using export-only decoder eval_idx={args.export_eval_idx} ({export_layers} decoder layers).")
+    # Optional deploy conversion for D-FINE/DEIM decoders. Plain RT-DETR decoders simply skip this step.
     for m in deploy_model.modules():
         if hasattr(m, "convert_to_deploy"):
             m.convert_to_deploy()
