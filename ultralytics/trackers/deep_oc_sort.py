@@ -61,7 +61,15 @@ class DeepOCSortTrack(OCSortTrack):
             self.update_features(feat, score)
 
     def update_features(self, feat: np.ndarray, score: float | None = None) -> None:
-        """Update feature vector with confidence-adaptive EMA smoothing."""
+        """Blend a new appearance feature into `smooth_feat` with confidence-adaptive EMA.
+
+        When `score` exceeds `det_thresh`, the EMA factor is `alpha_fixed_emb` boosted by the
+        normalized trust margin; below the threshold the new feature replaces the old one.
+
+        Args:
+            feat (np.ndarray): New (un-normalized) appearance feature vector.
+            score (float | None): Detection confidence used to modulate the EMA factor.
+        """
         feat = feat / np.linalg.norm(feat)
         self.curr_feat = feat
         if self.smooth_feat is None:
