@@ -908,14 +908,11 @@ class BaseTrainer:
             if not t.dtype.is_floating_point or torch.isfinite(t).all():
                 continue
             mask = ~torch.isfinite(t)
-            n_bad = int(mask.sum())
             if name.endswith("running_var"):
                 t[mask] = 1.0
-            elif name.endswith("running_mean"):
-                t[mask] = 0.0
             else:
                 t[mask] = 0.0
-            LOGGER.warning(f"Sanitized {n_bad} non-finite value(s) in {name}.")
+            LOGGER.warning(f"Sanitized {int(mask.sum())} non-finite value(s) in {name}.")
 
     def _load_checkpoint_state(self, ckpt):
         """Load optimizer, scaler, EMA, and best_fitness from checkpoint."""
