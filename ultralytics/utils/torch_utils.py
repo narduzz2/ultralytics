@@ -681,6 +681,8 @@ class ModelEMA:
             d = self.decay(self.updates)
 
             msd = unwrap_model(model).state_dict()  # model state_dict
+            if not all(torch.isfinite(v).all() for v in msd.values() if isinstance(v, torch.Tensor)):
+                LOGGER.warning("Non-finite values detected in model parameters. Skipping these layers in EMA update.")
             for k, v in self.ema.state_dict().items():
                 if v.dtype.is_floating_point and torch.isfinite(msd[k]).all():  # true for FP16 and FP32
                     v *= d
