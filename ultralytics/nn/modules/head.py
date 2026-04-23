@@ -1818,6 +1818,14 @@ class ADMBHead(nn.Module):
         self.score_filter_kernel = score_filter_kernel
         self.enabled = True  # set False to skip this head entirely (no accumulation, no proposals)
 
+        # ── auto temperature calibration ──────────────────────────────────────
+        self.auto_temperature = True        # derive β from data rather than keeping the fixed default
+        self.calibration_interval = 0       # 0 = calibrate once; N>0 = re-calibrate every N support images
+        self.min_calibration_bank_size = 50 # minimum bank size before calibration fires
+        self.calibration_target_score = 0.2 # desired anomaly-score for "typical normal" features (< accumulate_thresh)
+        self._calibrated = False            # whether the first calibration has already run
+        self._calibration_image_count = 0   # total support images processed so far
+
 
     # ── configuration ────────────────────────────────────────────────────────
 
@@ -1826,9 +1834,11 @@ class ADMBHead(nn.Module):
         self.update = update
 
     def reset_memory_bank(self) -> None:
-        """Discard all accumulated normal features."""
+        """Discard all accumulated normal features and reset calibration state."""
         self.memory_bank = torch.empty((0, 0), device=self.memory_bank.device)
         self.feature_dim = None
+        self._calibrated = False
+        self._calibration_image_count = 0
 
     def get_memory_bank_stats(self) -> dict:
         """Return size and feature dimension of the current memory bank."""
@@ -1839,6 +1849,42 @@ class ADMBHead(nn.Module):
         }
 
     # ── internals ─────────────────────────────────────────────────────────────
+
+    def _calibrate_temperature(self, normed_features: torch.Tensor, mem: torch.Tensor) -> None:
+        """Auto-calibrate the Noisy-OR temperature β from the current memory bank.
+
+        Solves for β such that a "typical normal" feature (at the 90th-percentile
+        of mean top-k cosine similarities) receives an anomaly score equal to
+        ``self.calibration_target_score``.  This keeps the score distribution
+        consistent regardless of how similar or dissimilar the dataset features are.
+
+        Formula (from the Noisy-OR single-entry approximation):
+            score ≈ 1 - exp(-β·(1 - s_typical))
+            β = -ln(1 - target_score) / (1 - s_typical)
+
+        Args:
+            normed_features: L2-normalised feature matrix [N, C] from the current batch.
+            mem: Current memory bank [M, C].
+        """
+        with torch.no_grad():
+            k = min(self.K, mem.shape[0])
+            # Sub-sample query rows to cap cost: 512 rows × M cols
+            sample = normed_features
+            if sample.shape[0] > 512:
+                idx = torch.randperm(sample.shape[0], device=sample.device)[:512]
+                sample = sample[idx]
+            sim = sample @ mem.t()                                  # [n, M]
+            topk_sim = sim.topk(k=k, dim=1).values                 # [n, k]
+            mean_topk = topk_sim.mean(dim=1)                       # [n]  — avg similarity per position
+            s_typical = torch.quantile(mean_topk, 0.90).clamp(0.0, 1.0 - 1e-4)
+            beta = -math.log(1.0 - self.calibration_target_score) / (1.0 - s_typical.item())
+            beta = max(0.1, min(20.0, beta))                        # safety clamp
+        old_temp = self.temperature
+        self.temperature = beta
+        LOGGER.info(
+            "ADMBHead: auto-calibrated temperature %.3f → %.3f  (s_90=%.4f, target_score=%.2f)",
+            old_temp, beta, s_typical.item(), self.calibration_target_score,
+        )
 
     @staticmethod
     def _conv2linear(conv: nn.Conv2d) -> nn.Linear:
@@ -1960,12 +2006,25 @@ class ADMBHead(nn.Module):
 
             total_added += added_this_image
 
+            # ── auto temperature calibration after each image ──────────────
+            self._calibration_image_count += 1
+            if self.auto_temperature and mem.shape[0] >= self.min_calibration_bank_size:
+                do_calibrate = (
+                    not self._calibrated
+                    or (self.calibration_interval > 0
+                        and self._calibration_image_count % self.calibration_interval == 0)
+                )
+                if do_calibrate:
+                    self._calibrate_temperature(normed_b, mem)
+                    self._calibrated = True
+
         self.memory_bank = mem
         LOGGER.info(
-            "OBMA: added=%d/%d keep=%.1f%% mem_size=%d",
+            "OBMA: added=%d/%d keep=%.1f%% mem_size=%d temperature=%.3f",
             total_added, B * H * W,
             100.0 * keep_flags.sum() / max(H * W, 1),
             self.memory_bank.shape[0],
+            self.temperature,
         )
         return keep_flags
 
@@ -2224,6 +2283,8 @@ class AnomalyDetection(Detect):
         accumulate_thresh: float | None = None,
         score_filter_kernel: int | None = None,
         active_layers: list[int] | None = None,
+        auto_temperature: bool | None = None,
+        calibration_interval: int | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters.
 
@@ -2237,6 +2298,11 @@ class AnomalyDetection(Detect):
                                              only the first two (P3+P4) heads.  None = all enabled.
                                              Head 0 = largest feature map (most detections),
                                              head 2 = smallest (coarsest features).
+            auto_temperature (bool | None): Enable automatic temperature calibration from data.
+                                            When True (default), β is derived from the 90th-percentile
+                                            cosine similarity in the bank once it reaches
+                                            ``min_calibration_bank_size`` features.
+            calibration_interval (int | None): Re-calibrate every N support images (0 = once only).
         """
         if ad_conf is not None:
             self.ad_conf = ad_conf
@@ -2255,6 +2321,12 @@ class AnomalyDetection(Detect):
         if active_layers is not None and self.adhead is not None:
             for i, h in enumerate(self.adhead):
                 h.enabled = (i in active_layers)
+        if auto_temperature is not None and self.adhead is not None:
+            for h in self.adhead:
+                h.auto_temperature = auto_temperature
+        if calibration_interval is not None and self.adhead is not None:
+            for h in self.adhead:
+                h.calibration_interval = calibration_interval
 
 
     def _get_decode_boxes(self, x):

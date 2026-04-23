@@ -779,6 +779,8 @@ class YOLOAnomaly(Model):
         accumulate_thresh: float | None = None,
         score_filter_kernel: int | None = None,
         active_layers: list[int] | None = None,
+        auto_temperature: bool | None = None,
+        calibration_interval: int | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters and optionally switch mode.
 
@@ -790,6 +792,10 @@ class YOLOAnomaly(Model):
             score_filter_kernel (int | None): Kernel size for spatial mean filter (1=off, 3/5/7=smoothing).
             active_layers (list[int] | None): Indices of detection layers to enable, e.g. [0, 1] uses only
                                               the first two (P3+P4). None = all layers enabled.
+            auto_temperature (bool | None): Enable/disable automatic temperature calibration from data.
+                                            When True (default), β is derived from the 90th-percentile
+                                            cosine similarity once the bank has enough features.
+            calibration_interval (int | None): Re-calibrate every N support images (0 = calibrate once only).
         """
         assert isinstance(self.model, YOLOAnomalyModel), "Call setup() before set_ad_params()."
         head = self.model.model[-1]
@@ -800,6 +806,8 @@ class YOLOAnomaly(Model):
             accumulate_thresh=accumulate_thresh,
             score_filter_kernel=score_filter_kernel,
             active_layers=active_layers,
+            auto_temperature=auto_temperature,
+            calibration_interval=calibration_interval,
         )
         if mode is not None:
             self.set_mode(mode)
