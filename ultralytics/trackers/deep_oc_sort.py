@@ -64,21 +64,21 @@ class DeepOCSortTrack(OCSortTrack):
             self.smooth_feat = alpha * self.smooth_feat + (1 - alpha) * feat
         self.smooth_feat = self.smooth_feat / np.linalg.norm(self.smooth_feat)
 
-    def update(self, new_track: STrack, frame_id: int):
-        """Update track state with a new matched detection, recording observation and features."""
+    def update(self, new_track: STrack, frame_id: int) -> None:
+        """Update track state with a matched detection and refresh appearance features."""
         if new_track.curr_feat is not None:
             self.update_features(new_track.curr_feat, new_track.score)
         super().update(new_track, frame_id)
 
-    def re_activate(self, new_track: STrack, frame_id: int, new_id: bool = False):
-        """Reactivate a lost track with updated features."""
+    def re_activate(self, new_track: STrack, frame_id: int, new_id: bool = False) -> None:
+        """Re-activate a lost track and refresh appearance features."""
         if new_track.curr_feat is not None:
             self.update_features(new_track.curr_feat, new_track.score)
         super().re_activate(new_track, frame_id, new_id)
 
     @staticmethod
-    def multi_gmc(stracks: list, H: np.ndarray = np.eye(2, 3)):
-        """Apply GMC correctly for XYAH state: rotate only (x,y) and (vx,vy), not (a,h)."""
+    def multi_gmc(stracks: list[DeepOCSortTrack], H: np.ndarray = np.eye(2, 3)) -> None:
+        """Apply GMC correctly for XYAH state by rotating `(x, y)` and `(vx, vy)` only, not `(a, h)`."""
         if not stracks:
             return
         multi_mean = np.asarray([st.mean.copy() for st in stracks])
@@ -146,8 +146,8 @@ class DeepOCSORT(OCSORT):
         else:
             self.encoder = None
 
-    def init_track(self, results, img=None):
-        """Initialize DeepOCSortTrack instances with optional appearance features."""
+    def init_track(self, results, img: np.ndarray | None = None) -> list[DeepOCSortTrack]:
+        """Build :class:`DeepOCSortTrack` instances, attaching ReID features when enabled."""
         if len(results) == 0:
             return []
         bboxes = results.xywhr if hasattr(results, "xywhr") else results.xywh
@@ -168,10 +168,11 @@ class DeepOCSORT(OCSORT):
             for (xywh, s, c) in zip(bboxes, results.conf, results.cls)
         ]
 
-    def get_dists(self, tracks, detections):
-        """Compute cost matrix combining IoU and appearance (BOTSORT-style min fusion).
+    def get_dists(self, tracks: list[DeepOCSortTrack], detections: list[DeepOCSortTrack]) -> np.ndarray:
+        """Compute the cost matrix using `min(IoU, appearance)` fusion plus OCM velocity cost.
 
-        Uses min(IoU_cost, appearance_cost) with proximity gating, plus OCM velocity cost.
+        Follows BoT-SORT's appearance-fusion pattern: IoU distance is gated by `proximity_thresh`,
+        appearance distance is gated by `appearance_thresh`, and the per-pair minimum is taken.
         """
         iou_dists = matching.iou_distance(tracks, detections)
         dists_mask = iou_dists > (1 - self.proximity_thresh)
