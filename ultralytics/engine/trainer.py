@@ -923,6 +923,7 @@ class BaseTrainer:
         if self.ema and ckpt.get("ema"):
             self.ema = ModelEMA(self.model)  # validation with EMA creates inference tensors that can't be updated
             self.ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
+            self._sanitize_non_finite_values(self.ema.ema)  # sanitize ema weight
             self.ema.updates = ckpt["updates"]
         self.best_fitness = ckpt.get("best_fitness", 0.0)
 
