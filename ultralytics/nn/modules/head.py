@@ -2241,8 +2241,11 @@ class AnomalyDetection(Detect):
         assert self.adhead is not None, "Call build_adhead() before forward()."
 
         bs = x[0].shape[0]
-        cv2 = self.one2one_cv2 if self.end2end else self.cv2
-        cv3 = self.one2one_cv3 if self.end2end else self.cv3
+        # Always use the branches that build_adhead() truncated — determined by architecture,
+        # not by self.end2end.  self.end2end only controls the *output format* (top-k vs raw).
+        _has_e2e = hasattr(self, "one2one_cv2")
+        cv2 = self.one2one_cv2 if _has_e2e else self.cv2
+        cv3 = self.one2one_cv3 if _has_e2e else self.cv3
 
         boxes, scores, index = [], [], []
         for i in range(self.nl):
