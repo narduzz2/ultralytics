@@ -3,14 +3,21 @@
 # YOLO26-SimpleViT-cls: SimpleViT (arXiv:2205.01580) patchify Conv(k=16,s=16) + repeated MHSA blocks.
 # 14x14 token grid at 224px matches EUPE-ViT-B. No learned pos-embed (export parity).
 # Blocks in ultralytics/nn/modules/vit_blocks.py. Inject before model build: `import callbacks.vit_modules`.
+#
+# Export validation (2026-04-23 R3.3, RTX PRO 6000 Blackwell, imgsz=224):
+#   PASS: TorchScript, ONNX opset17, OpenVINO, CoreML (.mlpackage ~0.5× ONNX size), TFLite fp32, NCNN, MNN
+#   PASS: TensorRT fp16 — s: 2.122 ms, l: 2.411 ms bs=1 (both ≤1.5× yolo26s-cls conv baseline 1.83 ms)
+#   FAIL: PaddlePaddle "Model not supported yet" (SDPA conversion gap)
+#   FAIL: RKNN — env-destructive (rknn-toolkit2 AutoUpdate downgrades torch); run in isolated venv
+#   ONNX node counts: s=789, l=919 (no 2D RoPE avoids 554 Constant + 99 Mul bloat seen in AIFI ViT)
 
 # Parameters
 nc: 1000 # number of classes
 
 scales:
   # [depth, width, max_channels]
-  s: [1.0, 0.50, 1024] # target ~5-7M params (dim=192 @ s scale, 12 blocks)
-  l: [1.17, 0.75, 1024] # target ~14-16M params (dim=288, 14 blocks)
+  s: [1.0, 0.50, 1024] # 7.01 M params; TRT fp16 bs=1 2.122 ms (see header)
+  l: [1.17, 0.75, 1024] # 15.84 M params; TRT fp16 bs=1 2.411 ms (see header)
 
 # SimpleViT backbone: Conv patchify + 12 MHSABlocks
 backbone:

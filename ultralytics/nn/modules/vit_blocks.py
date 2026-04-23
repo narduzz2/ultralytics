@@ -7,6 +7,16 @@ No `nn.MultiheadAttention` (source of AIFI's 1327-node ONNX bloat). No 2D RoPE (
 
 Injected into `ultralytics.nn.tasks` namespace via `callbacks/vit_modules.py` so `parse_model` resolves
 them through `globals()[m]`. All blocks are dim-preserving (C_in == C_out, H/W unchanged).
+
+Export validation (2026-04-23 R3.3, RTX PRO 6000 Blackwell, imgsz=224, bs=1 fp16):
+    yolo26s-fastvit-cls    5.05 M   228 ONNX nodes   1.948 ms   (conv baseline 1.83 ms, 234 nodes)
+    yolo26l-fastvit-cls   14.77 M   804 ONNX nodes   2.652 ms
+    yolo26s-simplevit-cls  7.01 M   789 ONNX nodes   2.122 ms
+    yolo26l-simplevit-cls 15.84 M   919 ONNX nodes   2.411 ms
+
+Must-build export paths pass across all 4 YAMLs: TorchScript, ONNX opset17, OpenVINO, CoreML, TFLite, TensorRT.
+PaddlePaddle fails (RepMixer/SDPA op-coverage gap in Paddle converter). RKNN runs only in an isolated venv
+(rknn-toolkit2 AutoUpdate downgrades torch 2.9→2.4 + cudnn 9.10→9.1, contaminating the primary env).
 """
 
 from __future__ import annotations
@@ -57,7 +67,7 @@ class MHSABlock(nn.Module):
     """Pre-norm ViT block with SDPA + LN + Linear FFN. Dim-preserving 4D in/out.
 
     Uses explicit QKV Linear + `F.scaled_dot_product_attention` instead of `nn.MultiheadAttention` (the AIFI bloat
-    source — MHA wraps to 1327 ONNX nodes on yolo26-vit-cls @ opset 17). SDPA decomposes in opset 17 to
+    source — MHA-based AIFI ViT wraps to ~1327 ONNX nodes @ opset 17). SDPA decomposes in opset 17 to
     `MatMul+Softmax+MatMul+Mul(scale)`; the win is skipping PyTorch's MHA wrapper, not graph fusion.
 
     Used for: FastViT stage 4 (global attention at the coarsest scale); every layer of SimpleViT.
