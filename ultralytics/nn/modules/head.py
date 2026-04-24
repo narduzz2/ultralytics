@@ -1823,6 +1823,10 @@ class ADMBHead(nn.Module):
         self.calibration_interval = 0       # 0 = calibrate once; N>0 = re-calibrate every N support images
         self.min_calibration_bank_size = 50 # minimum bank size before calibration fires
         self.calibration_target_score = 0.2 # desired anomaly-score for "typical normal" features (< accumulate_thresh)
+        assert self.calibration_target_score < self.accumulate_thresh, (
+            f"calibration_target_score ({self.calibration_target_score}) must be "
+            f"< accumulate_thresh ({self.accumulate_thresh})"
+        )
         self._calibrated = False            # whether the first calibration has already run
         self._calibration_image_count = 0   # total support images processed so far
 
@@ -2038,7 +2042,6 @@ class ADMBHead(nn.Module):
                 self._calibrated = True
 
         # ── EM iterations (additional E↔M rounds) ────────────────────────────
-        em_iters_run = 0  # number of additional EM rounds that actually ran (excluding pass-0)
         for em_t in range(1, self.em_iters):
             # M-step: recalibrate β if auto_temperature is on
             if self.auto_temperature and mem.shape[0] >= self.min_calibration_bank_size:
@@ -2049,7 +2052,6 @@ class ADMBHead(nn.Module):
             # Pass bank_before=non-zero so keep_flags won't be overwritten by later passes.
             mem, added_em = _run_obma_pass(all_normed, mem, added)
             total_added += added_em
-            em_iters_run += 1
             LOGGER.debug(
                 "OBMA-EM iter %d/%d: added=%d mem_size=%d temperature=%.3f",
                 em_t, self.em_iters - 1, added_em, mem.shape[0], self.temperature,
@@ -2060,13 +2062,12 @@ class ADMBHead(nn.Module):
 
         self.memory_bank = mem
         LOGGER.info(
-            "OBMA: total_added=%d keep=%.1f%% mem_size=%d temperature=%.3f em_extra_iters=%d/%d",
+            "OBMA: total_added=%d keep=%.1f%% mem_size=%d temperature=%.3f em_iters_run=%d",
             total_added,
             100.0 * keep_flags.sum() / max(H * W, 1),
             self.memory_bank.shape[0],
             self.temperature,
-            em_iters_run,          # how many extra EM rounds actually ran (0 when em_iters=1)
-            max(0, self.em_iters - 1),  # how many were requested
+            min(self.em_iters, 1 + sum(1 for _ in range(1, self.em_iters))),
         )
         return keep_flags
 
