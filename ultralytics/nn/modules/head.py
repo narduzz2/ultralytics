@@ -1964,7 +1964,6 @@ class ADMBHead(nn.Module):
     def _online_bootstrapped_memory_accumulation(
         self,
         cls_feat: torch.Tensor,
-        scores_hw: torch.Tensor,
         B: int,
         H: int,
         W: int,
@@ -1986,88 +1985,98 @@ class ADMBHead(nn.Module):
         total_added = 0
         keep_flags = torch.zeros(H * W, dtype=torch.bool, device=cls_feat.device)
 
-        # ── pre-compute and cache all normalised feature maps ─────────────────
-        # Saved on the Python stack; no attribute stored → no persistent memory leak.
+        # Pre-cache normalised features — reused across all EM passes.
         # Cost: B × H*W × C floats (e.g. 4 × 6400 × 256 ≈ 26 MB per layer — acceptable).
-        all_normed: list[torch.Tensor] = []
-        for b in range(B):
-            feats_b = cls_feat[b].permute(1, 2, 0).reshape(H * W, self.feature_dim).detach()
-            all_normed.append(F.normalize(feats_b, p=2, dim=1))  # [H*W, C]
+        all_normed = [
+            F.normalize(
+                cls_feat[b].permute(1, 2, 0).reshape(H * W, self.feature_dim).detach(),
+                p=2, dim=1,
+            )
+            for b in range(B)
+        ]  # list of [H*W, C]
 
-        def _run_obma_pass(normed_list, mem_in, added_in_bank_before):
-            """One E-step: iterate over all images, add novel features to mem_in.
-
-            Returns (mem_out, added_this_pass, keep_flags_updated).
-            keep_flags is only updated from image-0 of the first pass so that
-            the returned visualisation corresponds to the initial batch result.
-            """
+        def _run_obma_pass(mem_in: torch.Tensor, is_first_pass: bool):
+            """One E-step: iterate over all images, add novel features to mem_in."""
             mem = mem_in
-            added_pass = 0
-            for b, normed_b in enumerate(normed_list):
+            added = 0
+            for b, normed_b in enumerate(all_normed):
                 scores = self._anomaly_scores(normed_b, mem=mem)  # [H*W]
                 cand_idx = (scores > accumulate_thresh).nonzero(as_tuple=True)[0]
                 if cand_idx.numel() == 0:
                     continue
-                sort_order = scores[cand_idx].argsort(descending=True)
-                cand_idx = cand_idx[sort_order]
+                cand_idx = cand_idx[scores[cand_idx].argsort(descending=True)]
                 cand_feats = normed_b[cand_idx]
                 for i in range(cand_feats.shape[0]):
                     feat = cand_feats[i : i + 1]
                     if self._anomaly_scores(feat, mem=mem).item() > accumulate_thresh:
                         mem = torch.cat((mem, feat.to(mem.device, dtype=mem.dtype)), dim=0)
-                        added_pass += 1
-                        # Track keep_flags only for image-0 on pass-0
-                        if b == 0 and added_in_bank_before == 0:
+                        added += 1
+                        if b == 0 and is_first_pass:
                             keep_flags[cand_idx[i]] = True
-            return mem, added_pass
+            return mem, added
 
-        # ── Pass 0 (initial E-step, identical to original OBMA) ──────────────
-        bank_before = mem.shape[0]
-        mem, added = _run_obma_pass(all_normed, mem, 0)
-        total_added += added
+        def _maybe_calibrate(mem: torch.Tensor) -> bool:
+            """M-step: recalibrate β from the current bank if conditions are met.
 
-        # ── auto-temperature calibration + image counter ─────────────────────
-        # Count all B images after the first pass (mirrors original per-image counting).
+            Returns True if calibration actually ran (β was updated).
+            """
+            if not self.auto_temperature:
+                return False
+            if mem.shape[0] < self.min_calibration_bank_size:
+                return False
+            if self._calibrated and not (
+                self.calibration_interval > 0
+                and self._calibration_image_count % self.calibration_interval == 0
+            ):
+                return False
+            self._calibrate_temperature(torch.cat(all_normed, dim=0), mem)
+            self._calibrated = True
+            return True
+
+        # Unified EM loop: E-step → M-step every iteration.
+        #
+        # Reset-and-rebuild (when em_iters >= 2 and auto_temperature):
+        #   Pass 0: seed the bank with β=initial (may be over-inclusive).
+        #   M-step: calibrate β from the seeded bank.
+        #   If calibration ran → discard the seed bank and rebuild from scratch
+        #   with the correct β on pass 1.  This ensures the final bank was built
+        #   entirely under the calibrated temperature, not the default 3.0.
+        #   Pass 2+: standard convergence check.
         self._calibration_image_count += B
-        if self.auto_temperature and mem.shape[0] >= self.min_calibration_bank_size:
-            do_calibrate = (
-                not self._calibrated
-                or (self.calibration_interval > 0
-                    and self._calibration_image_count % self.calibration_interval == 0)
-            )
-            if do_calibrate:
-                # Use a flat view of all batch features for a representative sample.
-                all_normed_cat = torch.cat(all_normed, dim=0)  # [B*H*W, C]
-                self._calibrate_temperature(all_normed_cat, mem)
-                self._calibrated = True
+        em_iters_run = 0
+        for t in range(self.em_iters):
+            is_first_pass = (t == 0)
 
-        # ── EM iterations (additional E↔M rounds) ────────────────────────────
-        for em_t in range(1, self.em_iters):
-            # M-step: recalibrate β if auto_temperature is on
-            if self.auto_temperature and mem.shape[0] >= self.min_calibration_bank_size:
-                all_normed_cat = torch.cat(all_normed, dim=0)
-                self._calibrate_temperature(all_normed_cat, mem)
+            # E-step
+            mem, added = _run_obma_pass(mem, is_first_pass=is_first_pass)
+            total_added += added
+            em_iters_run = t + 1
 
-            # E-step: re-score with updated β; only positions NOT yet in bank can be added.
-            # Pass bank_before=non-zero so keep_flags won't be overwritten by later passes.
-            mem, added_em = _run_obma_pass(all_normed, mem, added)
-            total_added += added_em
-            LOGGER.debug(
-                "OBMA-EM iter %d/%d: added=%d mem_size=%d temperature=%.3f",
-                em_t, self.em_iters - 1, added_em, mem.shape[0], self.temperature,
-            )
-            if added_em == 0:
-                LOGGER.debug("OBMA-EM: converged at iter %d.", em_t)
+            # M-step — calibrate β from the bank just built
+            just_calibrated = _maybe_calibrate(mem)
+
+            # Reset-and-rebuild: after seeding on pass 0 and calibrating β,
+            # throw away the seed bank so pass 1 builds cleanly with correct β.
+            if is_first_pass and just_calibrated and self.em_iters >= 2:
+                mem = torch.zeros((0, self.feature_dim), device=cls_feat.device, dtype=cls_feat.dtype)
+                keep_flags.zero_()  # visualisation flags will be set properly in pass 1
+                total_added = 0     # restart counter — seed bank is discarded
+                continue            # go straight to pass 1 E-step
+
+            # Convergence check — skip on pass 0 (bank was just seeded)
+            if not is_first_pass and added == 0:
+                LOGGER.debug("OBMA-EM: converged at iter %d.", t)
                 break
 
         self.memory_bank = mem
         LOGGER.info(
-            "OBMA: total_added=%d keep=%.1f%% mem_size=%d temperature=%.3f em_iters_run=%d",
+            "OBMA: total_added=%d keep=%.1f%% mem_size=%d temperature=%.3f em_extra_iters=%d/%d",
             total_added,
             100.0 * keep_flags.sum() / max(H * W, 1),
             self.memory_bank.shape[0],
             self.temperature,
-            min(self.em_iters, 1 + sum(1 for _ in range(1, self.em_iters))),
+            em_iters_run - 1,
+            max(0, self.em_iters - 1),
         )
         return keep_flags
 
@@ -2122,10 +2131,8 @@ class ADMBHead(nn.Module):
 
         # accumulate high-confidence normal features into the memory bank (only when self.update is True)
         if self.update:
-            accumulate_mask = self._online_bootstrapped_memory_accumulation(cls_feat,
-                                                                             scores_hw,
-                                                                               B, H, W, 
-                                                                               self.accumulate_thresh)
+            accumulate_mask = self._online_bootstrapped_memory_accumulation(cls_feat, B, H, W,
+                                                                             self.accumulate_thresh)
 
         # infer flow — two paths:
         #   conf == 0 (export/dense): return all H*W positions with real scores, no boolean indexing.
@@ -2329,6 +2336,7 @@ class AnomalyDetection(Detect):
         auto_temperature: bool | None = None,
         calibration_interval: int | None = None,
         em_iters: int | None = None,
+        calibration_target_score: float | None = None,
     ) -> None:
         """Set anomaly-detection inference parameters.
 
@@ -2352,6 +2360,8 @@ class AnomalyDetection(Detect):
                                    >1 = after the initial OBMA E-step, re-calibrate β (M-step) then
                                    re-score all features (E-step) until no new features are added
                                    or em_iters rounds are exhausted.
+            calibration_target_score (float | None): Desired anomaly score for typical normal features.
+                                                     Must be strictly less than ``accumulate_thresh``.
         """
         if ad_conf is not None:
             self.ad_conf = ad_conf
@@ -2362,6 +2372,17 @@ class AnomalyDetection(Detect):
             if self.adhead is not None:
                 for h in self.adhead:
                     h.accumulate_thresh = accumulate_thresh
+        if calibration_target_score is not None and self.adhead is not None:
+            for h in self.adhead:
+                h.calibration_target_score = calibration_target_score
+        # Enforce invariant: calibration_target_score < accumulate_thresh.
+        # Checked whenever either value is updated so silent violations are caught immediately.
+        if (accumulate_thresh is not None or calibration_target_score is not None) and self.adhead is not None:
+            for h in self.adhead:
+                assert h.calibration_target_score < h.accumulate_thresh, (
+                    f"calibration_target_score ({h.calibration_target_score}) must be "
+                    f"< accumulate_thresh ({h.accumulate_thresh})"
+                )
         if score_filter_kernel is not None:
             self.score_filter_kernel = score_filter_kernel
             if self.adhead is not None:
