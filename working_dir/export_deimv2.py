@@ -44,6 +44,12 @@ def parse_args():
         help="Override decoder eval_idx only for export. Example: 3 keeps decoder layers 0..3 during export.",
     )
     p.add_argument(
+        "--export-num-queries",
+        type=int,
+        default=None,
+        help="Override head num_queries only for export. Example: 100 exports with num_queries=100.",
+    )
+    p.add_argument(
         "--no-fp32-attn",
         action="store_true",
         help="Disable DINOv3-safe fp32 attention pinning for TRT fp16 builds. "
@@ -226,6 +232,8 @@ def build_output_paths(args):
     extra_tags = []
     if args.export_eval_idx is not None:
         extra_tags.append(f"eidx{args.export_eval_idx}")
+    if args.export_num_queries is not None:
+        extra_tags.append(f"nq{args.export_num_queries}")
     if args.format == "engine" and args.half:
         extra_tags.append("nofp32attn" if args.no_fp32_attn else "fp32attn")
     suffix = f"_{'_'.join(extra_tags)}" if extra_tags else ""
@@ -265,6 +273,26 @@ def apply_export_eval_idx_override(deploy_model, export_eval_idx):
     return export_eval_idx + 1
 
 
+def apply_export_num_queries_override(deploy_model, export_num_queries):
+    """Apply an export-only num_queries override for RT-DETR-family heads."""
+    head = deploy_model.model[-1] if hasattr(deploy_model, "model") and len(deploy_model.model) else None
+    if head is None or not hasattr(head, "num_queries"):
+        raise RuntimeError("No RT-DETR-family head with num_queries was found in the export model.")
+    if export_num_queries <= 0:
+        raise ValueError(f"--export-num-queries must be positive, got {export_num_queries}.")
+
+    original_num_queries = head.num_queries
+    if export_num_queries > original_num_queries:
+        raise ValueError(
+            f"--export-num-queries may not exceed the checkpoint's num_queries ({original_num_queries}), "
+            f"got {export_num_queries}."
+        )
+
+    head.num_queries = export_num_queries
+
+    return export_num_queries
+
+
 def main():
     args = parse_args()
     onnx_path, engine_path = build_output_paths(args)
@@ -274,6 +302,9 @@ def main():
     deploy_model.pt_path = str(onnx_path.with_suffix(".pt"))
     for p in deploy_model.parameters():
         p.requires_grad = False
+    if args.export_num_queries is not None:
+        export_num_queries = apply_export_num_queries_override(deploy_model, args.export_num_queries)
+        print(f"Using export-only num_queries={export_num_queries}.")
     if args.export_eval_idx is not None:
         export_layers = apply_export_eval_idx_override(deploy_model, args.export_eval_idx)
         print(f"Using export-only decoder eval_idx={args.export_eval_idx} ({export_layers} decoder layers).")
