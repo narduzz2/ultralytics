@@ -295,7 +295,6 @@ class BaseTrainer:
         """Configure model, optimizer, dataloaders, and training utilities before the training loop."""
         ckpt = self.setup_model()
         self.model = self.model.to(self.device)
-        self._sanitize_non_finite_values(self.model)
         self.set_model_attributes()
 
         # Compile model
@@ -898,22 +897,6 @@ class BaseTrainer:
                 ) from e
         self.resume = resume
 
-    def _sanitize_non_finite_values(self, model: torch.nn.Module) -> None:
-        """Check for and sanitize NaN/Inf values in model state_dict tensors.
-
-        Args:
-            model (nn.Module): Model whose parameters will be checked and sanitized.
-        """
-        for name, t in model.state_dict().items():
-            if not t.dtype.is_floating_point or torch.isfinite(t).all():
-                continue
-            mask = ~torch.isfinite(t)
-            if name.endswith("running_var"):
-                t[mask] = 1.0
-            else:
-                t[mask] = 0.0
-            LOGGER.warning(f"Sanitized {int(mask.sum())} non-finite value(s) in {name}.")
-
     def _load_checkpoint_state(self, ckpt):
         """Load optimizer, scaler, EMA, and best_fitness from checkpoint."""
         if ckpt.get("optimizer") is not None:
@@ -923,7 +906,6 @@ class BaseTrainer:
         if self.ema and ckpt.get("ema"):
             self.ema = ModelEMA(self.model)  # validation with EMA creates inference tensors that can't be updated
             self.ema.ema.load_state_dict(ckpt["ema"].float().state_dict())
-            self._sanitize_non_finite_values(self.ema.ema)  # sanitize ema weight
             self.ema.updates = ckpt["updates"]
         self.best_fitness = ckpt.get("best_fitness", 0.0)
 

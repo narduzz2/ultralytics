@@ -682,7 +682,7 @@ class ModelEMA:
 
             msd = unwrap_model(model).state_dict()  # model state_dict
             for k, v in self.ema.state_dict().items():
-                if v.dtype.is_floating_point and torch.isfinite(msd[k]).all():  # skip NaN/Inf values
+                if v.dtype.is_floating_point:  # true for FP16 and FP32
                     v *= d
                     v += (1 - d) * msd[k].detach()
                     # assert v.dtype == msd[k].dtype == torch.float32, f'{k}: EMA {v.dtype},  model {msd[k].dtype}'

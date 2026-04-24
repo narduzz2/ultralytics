@@ -203,45 +203,21 @@ def test_train_reuses_loaded_checkpoint_model(monkeypatch):
     assert captured["weights"] is original_model, "Weights do not match original model"
 
 
-def test_non_finite_value_handling():
-    """Test sanitization of non-finite values in model parameters and EMA update skipping."""
-    import torch.nn as nn
-
-    from ultralytics.models.yolo import detect
-    from ultralytics.utils.torch_utils import ModelEMA
-
-    class DummyModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.bn = nn.BatchNorm2d(2)
-            self.weight = nn.Parameter(torch.randn(2))
-
-    model = DummyModel()
-    ema = ModelEMA(model)
-
-    model.bn.running_var[0] = float("inf")
-    model.bn.running_mean[0] = float("nan")
+def test_load_checkpoint_sanitizes_non_finite_values(tmp_path):
+    """Test sanitization of non-finite checkpoint tensors during load."""
+    model = torch.nn.Sequential(torch.nn.BatchNorm2d(2), torch.nn.Conv2d(2, 2, 1, bias=False))
+    model[0].running_var[0] = float("inf")
+    model[0].running_mean[0] = float("nan")
     with torch.no_grad():
-        model.weight[0] = float("nan")
+        model[1].weight[0, 0, 0, 0] = float("nan")
 
-    trainer = detect.DetectionTrainer(
-        overrides={"data": "coco8.yaml", "model": "yolo26n.yaml", "imgsz": 32, "epochs": 1}
-    )
-    trainer._sanitize_non_finite_values(model)
+    ckpt_path = tmp_path / "corrupt.pt"
+    torch.save({"model": model, "train_args": {"task": "detect"}}, ckpt_path)
 
-    assert torch.isfinite(model.bn.running_var).all() and model.bn.running_var[0] == 1.0
-    assert torch.isfinite(model.bn.running_mean).all() and model.bn.running_mean[0] == 0.0
-    assert torch.isfinite(model.weight).all() and model.weight[0] == 0.0
+    loaded, ckpt = load_checkpoint(ckpt_path)
+    state_dict = loaded.state_dict()
 
-    original = ema.ema.state_dict()["weight"].clone()
-    with torch.no_grad():
-        model.weight += 1.0
-    ema.update(model)
-    after_first = ema.ema.state_dict()["weight"].clone()
-    assert not torch.equal(after_first, original)
-
-    with torch.no_grad():
-        model.weight[0] = float("nan")
-    ema.update(model)
-    after_second = ema.ema.state_dict()["weight"]
-    assert torch.isfinite(after_second).all() and torch.equal(after_second, after_first)
+    assert torch.isfinite(state_dict["0.running_var"]).all() and state_dict["0.running_var"][0] == 1.0
+    assert torch.isfinite(state_dict["0.running_mean"]).all() and state_dict["0.running_mean"][0] == 0.0
+    assert torch.isfinite(state_dict["1.weight"]).all() and state_dict["1.weight"][0, 0, 0, 0] == 0.0
+    assert torch.isfinite(ckpt["model"].state_dict()["1.weight"]).all()
