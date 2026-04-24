@@ -27,6 +27,10 @@ Flags:
 
 import sys
 from pathlib import Path
+import os
+
+_REPO_ROOT = str(Path(__file__).resolve().parent)
+os.environ["PYTHONPATH"] = _REPO_ROOT + os.pathsep + os.environ.get("PYTHONPATH", "")
 
 import torch
 
