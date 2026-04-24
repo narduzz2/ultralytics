@@ -21,7 +21,6 @@ import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
-import callbacks.vit_modules  # noqa: F401  # registers FastViTBlock/MHSABlock for YAML parsing
 from ultralytics.data.augment import classify_augmentations, classify_transforms
 from ultralytics.data.utils import IMG_FORMATS
 from ultralytics.models.yolo.classify.train import ClassificationTrainer

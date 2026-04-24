@@ -5,7 +5,7 @@
 Simple-component constraint: Conv2d, BatchNorm2d, LayerNorm, GELU, Linear, F.scaled_dot_product_attention.
 No `nn.MultiheadAttention` (source of AIFI's 1327-node ONNX bloat). No 2D RoPE (ECViT-t hits 554 Constant nodes).
 
-Injected into `ultralytics.nn.tasks` namespace via `callbacks/vit_modules.py` so `parse_model` resolves
+Registered in `ultralytics.nn.modules.__init__` and imported by `ultralytics.nn.tasks` so `parse_model` resolves
 them through `globals()[m]`. All blocks are dim-preserving (C_in == C_out, H/W unchanged).
 
 Export validation (2026-04-23 R3.3, RTX PRO 6000 Blackwell, imgsz=224, bs=1 fp16):

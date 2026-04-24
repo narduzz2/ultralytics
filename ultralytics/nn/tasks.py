@@ -47,6 +47,7 @@ from ultralytics.nn.modules import (
     Detect,
     DWConv,
     DWConvTranspose2d,
+    FastViTBlock,
     Focus,
     GhostBottleneck,
     GhostConv,
@@ -55,6 +56,7 @@ from ultralytics.nn.modules import (
     ImagePoolingAttn,
     Index,
     LRPCHead,
+    MHSABlock,
     Pose,
     Pose26,
     RepC3,
@@ -1785,7 +1787,7 @@ def parse_model(d, ch, verbose=True):
                     args.extend((True, 1.2))
             if m is C2fCIB:
                 legacy = False
-        elif m is AIFI:
+        elif m in frozenset({AIFI, FastViTBlock, MHSABlock}):
             args = [ch[f], *args]
         elif m in frozenset({HGStem, HGBlock}):
             c1, cm, c2 = ch[f], args[0], args[1]

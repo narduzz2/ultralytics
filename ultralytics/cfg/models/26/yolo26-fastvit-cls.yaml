@@ -1,7 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 # YOLO26-FastViT-cls: FastViT (arXiv:2303.14189) RepMixer stages 1-3 + MHSA stage 4.
-# Blocks in ultralytics/nn/modules/vit_blocks.py. Inject before model build: `import callbacks.vit_modules`.
+# Blocks in ultralytics/nn/modules/vit_blocks.py, resolved by parse_model in ultralytics/nn/tasks.py.
 #
 # Export validation (2026-04-23 R3.3, RTX PRO 6000 Blackwell, imgsz=224):
 #   PASS: TorchScript, ONNX opset17, OpenVINO, CoreML (.mlpackage ~0.5× ONNX size), TFLite fp32, NCNN, MNN
