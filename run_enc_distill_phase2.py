@@ -97,8 +97,16 @@ def main(argv: list[str]) -> None:
     mode = argv[2] if len(argv) > 2 else ("inet_linear_probe" if resume_args.get("freeze") else "inet_finetune")
     name = argv[3] if len(argv) > 3 else resume_args.get("name", f"phase2-{mode}-d7")
     phase1_wandb_id = argv[4] if len(argv) > 4 else ""
-    epochs = int(argv[5]) if len(argv) > 5 else None
-    patience = int(argv[6]) if len(argv) > 6 else None
+    epochs = int(argv[5]) if len(argv) > 5 else resume_args.get("epochs")
+    patience = int(argv[6]) if len(argv) > 6 else resume_args.get("patience")
+
+    # Resume auto-fallback: pre-fill cli overrides from saved args so resume preserves the run's
+    # lr/batch/nbs. Both the per-mode scaling blocks and the post-dispatch apply block read these
+    # vars, so populating once here covers both code paths.
+    if resume_args:
+        batch_override = batch_override or (str(resume_args["batch"]) if "batch" in resume_args else "")
+        lr_override = lr_override or (str(resume_args["lr0"]) if "lr0" in resume_args else "")
+        nbs_override = nbs_override or (str(resume_args["nbs"]) if "nbs" in resume_args else "")
 
     if mode in ("coco_det_finetune", "coco_det_finetune_frozen", "coco_pose_finetune", "dota_obb_finetune"):
         # Infer det/pose/obb model from phase1 cls model (yolo26s-cls.yaml -> yolo26s{,-pose,-obb}.yaml)
@@ -346,6 +354,15 @@ def main(argv: list[str]) -> None:
             optimizer="MuSGD",
             **_AUG_ARGS,
         )
+    # Resume drift guard: refuse silent data mismatch. The mode-inference at line 97 uses
+    # freeze as a proxy and can land on a different mode than the saved run (e.g. resumed
+    # coco_det_finetune defaults to inet_finetune). Fail loud rather than truncate the dataset.
+    if resume_args and "data" in resume_args and train_args["data"] != resume_args["data"]:
+        raise ValueError(
+            f"Refusing resume: mode-implied data mismatch (ckpt={resume_args['data']!r} vs "
+            f"mode={mode!r} → {train_args['data']!r}). Pass the correct mode positionally."
+        )
+
     # lr/batch/nbs are handled per-mode for scaled modes (coco_det_finetune, dota_obb_finetune);
     # for other modes they apply as final values.
     if mode not in _SCALED_MODES:

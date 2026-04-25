@@ -89,16 +89,6 @@ def main(argv: list[str]) -> None:
         resume = paths.patch_resume(resume)
     resume_args = _load_train_args(resume) if resume else {}
 
-    # Resume guard: prevent silent distill_path / adaptor_arch switches. These change graph topology
-    # (feat_adaptors built or not) and loss_items labels; switching mid-run corrupts checkpoints and WandB plots.
-    if resume_args:
-        for key, now in (("distill_path", distill_path), ("adaptor_arch", adaptor_arch)):
-            prev = resume_args.get(key, "adaptor" if key == "distill_path" else "mlp")
-            if now != prev:
-                raise ValueError(
-                    f"Refusing resume: --{key} mismatch (ckpt={prev!r} vs cli={now!r}). "
-                    f"Either drop the flag or start a fresh run."
-                )
     gpu = args[0] if args else "0"
     teachers = args[1] if len(args) > 1 else resume_args.get("teachers", "eupe:vitb16")
     name = (
@@ -106,12 +96,27 @@ def main(argv: list[str]) -> None:
     )
     recipe = args[3] if len(args) > 3 else "default"
     model_yaml = args[4] if len(args) > 4 else "yolo26s-cls.yaml"
-    data = args[5] if len(args) > 5 else "/data/shared-datasets/datacomp-12m"
-    epochs = int(args[6]) if len(args) > 6 else None
+    data = args[5] if len(args) > 5 else resume_args.get("data", "/data/shared-datasets/datacomp-12m")
+    epochs = int(args[6]) if len(args) > 6 else resume_args.get("epochs")
     r = RECIPES[recipe]
 
+    # Resume drift guard: refuse silent switches that corrupt mid-run state — distill_path /
+    # adaptor_arch change graph topology + loss_items labels; data change invalidates the run.
+    if resume_args:
+        for key, now, default in (
+            ("distill_path", distill_path, "adaptor"),
+            ("adaptor_arch", adaptor_arch, "mlp"),
+            ("data", data, "/data/shared-datasets/datacomp-12m"),
+        ):
+            prev = resume_args.get(key, default)
+            if now != prev:
+                raise ValueError(
+                    f"Refusing resume: --{key} mismatch (ckpt={prev!r} vs cli={now!r}). "
+                    f"Either drop the flag or start a fresh run."
+                )
+
     world_size = len(gpu.split(",")) if "," in gpu else 1
-    global_batch = int(batch_override or 64) * world_size  # default per-GPU = 64 (anchor per-rank)
+    global_batch = int(batch_override) * world_size if batch_override else int(resume_args.get("batch", 64 * world_size))
     scale = max(1.0, global_batch / NBS_CANONICAL)
     lr0 = float(lr_override or r["lr0"]) * scale
     nbs = max(global_batch, NBS_CANONICAL)
