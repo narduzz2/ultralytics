@@ -175,9 +175,9 @@ class ImageEncoderTrainer(ClassificationTrainer):
         #   EUPE ``configs/ssl_default_config.yaml`` optim.weight_decay=0.04, weight_decay_end=0.4.
         #   DINOv2 paper §A.3: cosine wd 0.04→0.4.
         # Activated by setting ``wd_end`` in the runner train_args (None or 0 keeps fixed wd).
-        # Photometric augs (grayscale/gaussian_blur/solarize) live inside Ultralytics's
-        # ``classify_augmentations`` (ultralytics/data/augment.py) — read directly from self.args
-        # when the dataset builds its torch_transforms; no callback needed.
+        # Photometric augs (grayscale/gaussian_blur/solarize) live in
+        # ``callbacks/distill_aug.py:classify_augmentations_distill`` and are read directly from
+        # self.args inside ``_build_transforms`` below; no callback needed.
         # ``weight_decay`` is in CFG_FRACTION_KEYS so already coerced to float by the cfg layer;
         # ``wd_end`` arrives from the recipe dict as a Python float. No paranoia casts needed.
         wd_end_v = getattr(self.args, "wd_end", None)
