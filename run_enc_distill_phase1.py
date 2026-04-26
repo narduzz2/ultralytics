@@ -39,7 +39,10 @@ RECIPES = {
     #
     # Knob → reference mapping:
     #   lr0=2e-4         → DINOv3 distillation_convnext/convnext_tiny_p16.yaml schedules.lr.peak
-    #   warmup_epochs=18 → DINOv3 80/500 ratio (16%) scaled to 114 ep
+    #   warmup_epochs=1  → matches wave-1 radio recipe (effective 2 ep at batch=1024 after Goyal scale).
+    #                      Pinned to wave-1 for clean A/B; the 5x lower lr already addresses the
+    #                      ep~7 BN-coupling fragility that drove wave-1 fastvit divergence,
+    #                      so longer warmup is not needed.
     #   weight_decay=0.04 + wd_end=0.2 → DINOv3 schedules.weight_decay.{start, peak} (callbacks/wd_schedule.py)
     #   grad_clip=3.0    → DINOv3 optim.clip_grad
     #   beta2=None       → falls through to AdamW default 0.999 (DINOv3 / EUPE convention)
@@ -58,7 +61,7 @@ RECIPES = {
         lr0=2e-4,
         weight_decay=0.04,
         wd_end=0.2,
-        warmup_epochs=18,
+        warmup_epochs=1,
         epochs=114,
         momentum=0.9,
         grad_clip=3.0,
