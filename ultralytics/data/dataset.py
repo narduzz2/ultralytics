@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 from collections import defaultdict
@@ -34,7 +35,10 @@ from .augment import (
     classify_transforms,
     v8_transforms,
     SemanticRandomScaleCrop,
-    SemanticResize
+    SemanticRandomScale,
+    SemanticRandomCrop,
+    PhotoMetricDistortion,
+    Mosaic
 )
 from .base import BaseDataset
 from .converter import merge_multi_segment
@@ -859,11 +863,7 @@ class SemanticDataset(BaseDataset):
         return labels
 
     def load_image(self, i, rect_mode=True):
-        """Load an image without resizing, keeping original dimensions for semantic segmentation.
-
-        Scaling and cropping are handled by transforms (SemanticRandomScaleCrop for train,
-        SemanticResize for val) instead of at load time.
-        """
+        """Load an image for semantic segmentation, scaling the short side to imgsz when rect_mode=True."""
         im, f, fn = self.ims[i], self.im_files[i], self.npy_files[i]
         if im is None:  # not cached in RAM
             if fn.exists():  # load npy
@@ -879,6 +879,14 @@ class SemanticDataset(BaseDataset):
                 raise FileNotFoundError(f"Image Not Found {f}")
 
             h0, w0 = im.shape[:2]  # orig hw
+            if rect_mode:  # resize short side to imgsz while maintaining aspect ratio
+                r = self.imgsz / min(h0, w0)
+                if r != 1:
+                    if h0 < w0:
+                        h, w = self.imgsz, math.ceil(w0 * r)
+                    else:
+                        h, w = math.ceil(h0 * r), self.imgsz
+                    im = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
             if im.ndim == 2:
                 im = im[..., None]
 
@@ -896,8 +904,28 @@ class SemanticDataset(BaseDataset):
         return self.ims[i], self.im_hw0[i], self.im_hw[i]
 
     def set_rectangle(self):
-        """Sort by aspect ratio and sync mask-related lists with reordered images/labels."""
-        super().set_rectangle()
+        """Sort by aspect ratio and set batch shapes for short-side-scaled semantic inputs."""
+        bi = np.floor(np.arange(self.ni) / self.batch_size).astype(int)  # batch index
+        nb = bi[-1] + 1  # number of batches
+
+        s = np.array([x.pop("shape") for x in self.labels])  # hw
+        ar = s[:, 0] / s[:, 1]  # aspect ratio
+        irect = ar.argsort()
+        self.im_files = [self.im_files[i] for i in irect]
+        self.labels = [self.labels[i] for i in irect]
+        ar = ar[irect]
+
+        # Short-side-scaling: short = imgsz, long = imgsz / ar (wide) or imgsz * ar (tall).
+        # Batch shape bounds all images (handles mixed batches).
+        shapes = [[1, 1]] * nb
+        for i in range(nb):
+            ari = ar[bi == i]
+            mini, maxi = ari.min(), ari.max()
+            shapes[i] = [max(maxi, 1), 1 / min(mini, 1)]
+
+        self.batch_shapes = np.ceil(np.array(shapes) * self.imgsz / self.stride + self.pad).astype(int) * self.stride
+        self.batch = bi  # batch index of image
+
         self.mask_files = [lb["mask_file"] for lb in self.labels]
         self.mask_npy_files = [Path(f).with_suffix(".npy") for f in self.mask_files]
 
@@ -917,6 +945,8 @@ class SemanticDataset(BaseDataset):
     @staticmethod
     def _read_mask_file(mask_path: str) -> np.ndarray | None:
         """Read a semantic mask from disk."""
+        if not os.path.exists(mask_path):
+            return None
         try:
             with Image.open(mask_path) as im:
                 return np.array(im, dtype=np.uint8)
@@ -1064,16 +1094,36 @@ class SemanticDataset(BaseDataset):
             (Compose): Composed transforms.
         """
         transforms = []
+        nc = self.data.get("nc", len(self.data.get("names", [])))
         if self.augment:
             crop_size = self.data.get("crop_size", 512)
-            size_range = self.data.get("size_range", [self.imgsz, self.imgsz])
-            transforms.append(SemanticRandomScaleCrop(size_range=size_range, crop_size=crop_size))
+            transforms.append(SemanticRandomScale(scale_min=0.5, scale_max=2.0))
+            transforms.append(SemanticRandomCrop(crop_size=crop_size, ignore_label=255 if nc > 1 else 0))
             transforms.append(RandomFlip(p=0.5, direction="horizontal"))
+            transforms.append(PhotoMetricDistortion(        
+                brightness_delta=12,
+                contrast_range=(0.85, 1.15),
+                saturation_range=(0.85, 1.15),
+
+                # brightness_delta=32,
+                # contrast_range=(0.5, 1.5),
+                # saturation_range=(0.5, 1.5),
+
+                # brightness_delta=8,
+                # contrast_range=(0.9, 1.1),
+                # saturation_range=(0.9, 1.1),
+
+                hue_delta=0,
+                ))
         else:
-            size_range = self.data.get("size_range", [self.imgsz, self.imgsz])
-            transforms.append(SemanticResize(size_range=size_range))
+            transforms.append(LetterBox(auto=False, scaleup=False, center=False, stride=self.stride, ignore_label=255 if nc > 1 else 0))
         transforms.append(SemanticFormat())
         return Compose(transforms)
+
+    def close_mosaic(self, hyp) -> None:
+        """Disable mosaic augmentation and rebuild transforms."""
+        hyp.mosaic = 0.0
+        self.transforms = self.build_transforms(hyp)
 
     def convert_label(self, label, inverse=False):
         temp = label.copy()
