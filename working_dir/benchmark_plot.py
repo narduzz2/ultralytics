@@ -7,7 +7,8 @@ import matplotlib.pyplot as plt
 
 
 # =============================================================================
-# SELECT BENCHMARK HERE: "m5", "m5_new", "m5_coreml", "xeon", "xeon_new", "t4", "rf_compare", "t4_new", "jetson-agx-thor-gpu",
+# SELECT DEFAULT BENCHMARK HERE: "m5", "m5_new", "m5_coreml", "xeon", "xeon_new", "t4",
+# "t4_deimv2_xl_obj365_analysis", "rf_compare", "t4_new", "jetson-agx-thor-gpu",
 # "jetson-agx-thor-cpu", "jetson-agx-orin-gpu", "jetson-agx-orin-cpu",
 # "jetson-orin-nano-super-gpu", or "jetson-orin-nano-super-cpu"
 # =============================================================================
@@ -327,14 +328,15 @@ BENCHMARKS = {
                 ("x", 13.5, {"ap": 56.5, "ap50": 74.0, "ap75": 61.6, "ap_small": 41.1, "ap_medium": 60.8, "ap_large": 71.5}),
             ],
             "RF-DETR (obj365, TopK)": [
-                ("n", 2.8, {"ap": 48.4, "ap50": 67.5, "ap75": 51.7, "ap_small": 25.3, "ap_medium": 53.6, "ap_large": 71.0}),
-                ("s", 4.1, {"ap": 53.0, "ap50": 72.0, "ap75": 57.1, "ap_small": 31.8, "ap_medium": 58.4, "ap_large": 73.1}),
-                ("m", 5.2, {"ap": 54.7, "ap50": 73.6, "ap75": 59.1, "ap_small": 35.9, "ap_medium": 59.8, "ap_large": 73.7}),
-                ("l", 8.1, {"ap": 56.5, "ap50": 75.1, "ap75": 61.2, "ap_small": 39.0, "ap_medium": 61.0, "ap_large": 74.0}),
+                ("n", 2.7, {"ap": 48.4, "ap50": 67.5, "ap75": 51.7, "ap_small": 25.3, "ap_medium": 53.6, "ap_large": 71.0}),
+                ("s", 4.0, {"ap": 53.0, "ap50": 72.0, "ap75": 57.1, "ap_small": 31.8, "ap_medium": 58.4, "ap_large": 73.1}),
+                ("m", 5.0, {"ap": 54.7, "ap50": 73.6, "ap75": 59.1, "ap_small": 35.9, "ap_medium": 59.8, "ap_large": 73.7}),
+                ("l", 7.8, {"ap": 56.5, "ap50": 75.1, "ap75": 61.2, "ap_small": 39.0, "ap_medium": 61.0, "ap_large": 74.0}),
                 ("x", 16.9, {"ap": 58.6, "ap50": 77.5, "ap75": 64.0, "ap_small": 40.8, "ap_medium": 64.3, "ap_large": 76.3}),
-                ("xxl", 26.4, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
+                ("xxl", 26.6, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
             ],
             "YOLO26_RTDETR (obj365)": [
+                ("l4", 7.6, {"ap": 56.5, "ap50": 74.1, "ap75": 61.6, "ap_small": 41.3, "ap_medium": 61.0, "ap_large": 70.9}),
                 ("l", 8.1, {"ap": 56.7, "ap50": 74.3, "ap75": 61.8, "ap_small": 41.7, "ap_medium": 61.1, "ap_large": 71.0}),
             ],
             "LW-DETR (obj365)": [
@@ -350,9 +352,10 @@ BENCHMARKS = {
                 ("xl", 14.6, {"ap": 58.0, "ap50": 75.3, "ap75": 63.2, "ap_small": 39.6, "ap_medium": 63.3, "ap_large": 76.3}),
                 ("xxl", 32.6, {"ap": 59.8, "ap50": 77.1, "ap75": 65.3, "ap_small": 42.8, "ap_medium": 65.5, "ap_large": 77.1}),
             ],
-            # "DEIMv2 (Ultralytics, obj365)": [
-            #     ("l", 9.9, {"ap": 57.8, "ap50": 75.0, "ap75": 63.1, "ap_small": 39.7, "ap_medium": 62.6, "ap_large": 75.8}),
-            # ],
+            "DEIMv2 (Ultralytics, obj365)": [
+                ("xl4", 13.9, {"ap": 59.5, "ap50": 77.1, "ap75": 65.1, "ap_small": 42.7, "ap_medium": 64.8, "ap_large": 76.8}),
+                ("xl6", 14.6, {"ap": 59.6, "ap50": 77.4, "ap75": 65.1, "ap_small": 43.1, "ap_medium": 64.7, "ap_large": 76.8}),
+            ],
             # "DINOv3-RTDETR": [
             #     ("s", 4.3, {"ap": 50.3, "ap50": 69.0, "ap75": 54.4, "ap_small": 27.8, "ap_medium": 55.8, "ap_large": 72.5}),
             # ],
@@ -426,27 +429,46 @@ BENCHMARKS = {
         "title": "Object Detection Models: Latency vs mAP (Tesla T4 GPU, TensorRT v10.11)",
         "models": {
             "RF-DETR (obj365, TopK)": [
-                ("n", 2.8, {"ap": 48.4, "ap50": 67.5, "ap75": 51.7, "ap_small": 25.3, "ap_medium": 53.6, "ap_large": 71.0}),
-                ("s", 4.1, {"ap": 53.0, "ap50": 72.0, "ap75": 57.1, "ap_small": 31.8, "ap_medium": 58.4, "ap_large": 73.1}),
-                ("m", 5.2, {"ap": 54.7, "ap50": 73.6, "ap75": 59.1, "ap_small": 35.9, "ap_medium": 59.8, "ap_large": 73.7}),
-                ("l", 8.1, {"ap": 56.5, "ap50": 75.1, "ap75": 61.2, "ap_small": 39.0, "ap_medium": 61.0, "ap_large": 74.0}),
+                ("n", 2.7, {"ap": 48.4, "ap50": 67.5, "ap75": 51.7, "ap_small": 25.3, "ap_medium": 53.6, "ap_large": 71.0}),
+                ("s", 4.0, {"ap": 53.0, "ap50": 72.0, "ap75": 57.1, "ap_small": 31.8, "ap_medium": 58.4, "ap_large": 73.1}),
+                ("m", 5.0, {"ap": 54.7, "ap50": 73.6, "ap75": 59.1, "ap_small": 35.9, "ap_medium": 59.8, "ap_large": 73.7}),
+                ("l", 7.8, {"ap": 56.5, "ap50": 75.1, "ap75": 61.2, "ap_small": 39.0, "ap_medium": 61.0, "ap_large": 74.0}),
                 ("x", 16.9, {"ap": 58.6, "ap50": 77.5, "ap75": 64.0, "ap_small": 40.8, "ap_medium": 64.3, "ap_large": 76.3}),
-                ("xxl", 26.4, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
+                ("xxl", 26.6, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
             ],
-            # "DEIMv2 (Ultralytics, obj365)": [
-            #     ("l", 9.9, {"ap": 57.8, "ap50": 75.0, "ap75": 63.1, "ap_small": 39.7, "ap_medium": 62.6, "ap_large": 75.8}),
-            # ],
+            "DEIMv2 (Ultralytics, obj365)": [
+                ("xl4", 13.9, {"ap": 59.5, "ap50": 77.1, "ap75": 65.1, "ap_small": 42.7, "ap_medium": 64.8, "ap_large": 76.8}),
+                ("xl6", 14.6, {"ap": 59.6, "ap50": 77.4, "ap75": 65.1, "ap_small": 43.1, "ap_medium": 64.7, "ap_large": 76.8}),
+            ],
             "DEIMv2 (Ultralytics)": [
                 # ("l", 10.7, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
                 ("xl", 14.6, {"ap": 58.0, "ap50": 75.3, "ap75": 63.2, "ap_small": 39.6, "ap_medium": 63.3, "ap_large": 76.3}),
                 ("xxl", 32.6, {"ap": 59.8, "ap50": 77.1, "ap75": 65.3, "ap_small": 42.8, "ap_medium": 65.5, "ap_large": 77.1}),
             ],
             "YOLO26_RTDETR (obj365)": [
+                ("l4", 7.6, {"ap": 56.5, "ap50": 74.1, "ap75": 61.6, "ap_small": 41.3, "ap_medium": 61.0, "ap_large": 70.9}),
                 ("l", 8.1, {"ap": 56.7, "ap50": 74.3, "ap75": 61.8, "ap_small": 41.7, "ap_medium": 61.1, "ap_large": 71.0}),
             ],
 
             "YOLO26_RTDETR": [
                 ("l", 8.2, {"ap": 55.3, "ap50": 73.0, "ap75": 60.2, "ap_small": 39.6, "ap_medium": 59.3, "ap_large": 70.7}),
+            ],
+        },
+    },
+    "t4_deimv2_xl_obj365_analysis": {
+        "title": "DEIMv2-XL obj365: Decoder/Query Analysis (Tesla T4 GPU, TensorRT v10.11)",
+        "models": {
+            "Decoder Layers": [
+                # Default model uses 6 decoder layers. export_eval_idx=eidx means eidx+1 layers are kept.
+                ("2L", 13.5, {"ap": 58.4}),
+                ("3L", 13.8, {"ap": 58.8}),
+                ("4L", 13.9, {"ap": 59.2}),
+                ("6L", 14.6, {"ap": 59.4}),
+            ],
+            "Queries @ 4L": [
+                ("Q50", 13.1, {"ap": 57.7}),
+                ("Q100", 13.5, {"ap": 58.7}),
+                ("Q300", 13.9, {"ap": 59.2}),
             ],
         },
     },
@@ -482,6 +504,8 @@ MODEL_STYLES = {
     "RT-DETR (obj365)": ("v", 8),
     "DEIMv2 (Ultralytics)": ("p", 8),
     "DEIMv2 (Ultralytics, obj365)": ("p", -12),
+    "Decoder Layers": ("o", 8),
+    "Queries @ 4L": ("s", -12),
 }
 
 
@@ -553,8 +577,8 @@ def plot_series(ax, points, label, color, marker, label_offset, metric):
     return True
 
 
-def build_plot(output_path: Path, show: bool, metric: str) -> None:
-    benchmark_data = BENCHMARKS[BENCHMARK]
+def build_plot(output_path: Path, show: bool, metric: str, benchmark_name: str) -> None:
+    benchmark_data = BENCHMARKS[benchmark_name]
     models = benchmark_data["models"]
     title = benchmark_data["title"]
 
@@ -571,7 +595,7 @@ def build_plot(output_path: Path, show: bool, metric: str) -> None:
         plotted |= plot_series(ax, data, model_name, palette(i), marker, label_offset, metric)
 
     if not plotted:
-        raise ValueError(f"No '{metric}' values available for benchmark '{BENCHMARK}'.")
+        raise ValueError(f"No '{metric}' values available for benchmark '{benchmark_name}'.")
 
     title_metric = METRIC_TITLE_TOKENS[metric]
     ax.set_title(title if metric == "ap" else title.replace("mAP", title_metric))
@@ -598,6 +622,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_METRIC,
         help="Y-axis metric to plot. AP keeps existing mAP50-95 values.",
     )
+    parser.add_argument(
+        "--benchmark",
+        choices=list(BENCHMARKS.keys()),
+        default=BENCHMARK,
+        help="Benchmark dataset to plot.",
+    )
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--show", action="store_true", help="Display the plot window.")
     return parser.parse_args()
@@ -606,11 +636,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     output_path = args.output or Path(__file__).with_name(
-        f"benchmark_plot_{BENCHMARK}.png"
+        f"benchmark_plot_{args.benchmark}.png"
         if args.metric == "ap"
-        else f"benchmark_plot_{BENCHMARK}_{args.metric}.png"
+        else f"benchmark_plot_{args.benchmark}_{args.metric}.png"
     )
-    build_plot(output_path, args.show, args.metric)
+    build_plot(output_path, args.show, args.metric, args.benchmark)
 
 
 if __name__ == "__main__":
