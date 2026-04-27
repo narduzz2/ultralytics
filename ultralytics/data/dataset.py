@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 from collections import defaultdict
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
@@ -739,10 +740,10 @@ class ClassificationDataset:
         self.samples = [[*list(x), Path(x[0]).with_suffix(".npy"), None] for x in self.samples]  # file, index, npy, im
         self.imgsz = args.imgsz
         self.img_cache = None
-        if self.cache_ram and not self._check_cache_ram(safety_margin=0.5):
+        if self.cache_ram and not self.check_cache_ram():
             self.cache_ram = False
         if self.cache_ram:
-            self._preload_ram()
+            self.cache_images()
         scale = (1.0 - args.scale, 1.0)  # (0.08, 1.0)
         self.torch_transforms = (
             classify_augmentations(
@@ -787,21 +788,24 @@ class ClassificationDataset:
         """Return the total number of samples in the dataset."""
         return len(self.samples)
 
-    def _check_cache_ram(self, safety_margin: float = 0.5) -> bool:
-        """Estimate RAM needed to cache the dataset and check it fits in available memory."""
-        import random
+    def check_cache_ram(self, safety_margin: float = 0.5) -> bool:
+        """Check if there's enough RAM for caching images.
 
-        import psutil
+        Args:
+            safety_margin (float): Safety margin factor for RAM calculation.
 
-        b, gb = 0, 1 << 30
-        n = min(len(self.samples), 30)
+        Returns:
+            (bool): True if there's enough RAM, False otherwise.
+        """
+        b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
+        n = min(len(self.samples), 30)  # extrapolate from 30 random images
         for _ in range(n):
             im = cv2.imread(random.choice(self.samples)[0])
             if im is None:
                 continue
             b += self.imgsz * self.imgsz * im.shape[2]  # post-resize footprint
-        mem_required = b * len(self.samples) / n * (1 + safety_margin)
-        mem = psutil.virtual_memory()
+        mem_required = b * len(self.samples) / n * (1 + safety_margin)  # bytes required to cache dataset into RAM
+        mem = __import__("psutil").virtual_memory()
         if mem_required > mem.available:
             LOGGER.warning(
                 f"{self.prefix}{mem_required / gb:.1f}GB RAM required to cache images "
@@ -811,24 +815,20 @@ class ClassificationDataset:
             return False
         return True
 
-    def _preload_ram(self) -> None:
-        """Preload all images into a shared-memory torch.uint8 tensor (HWC) once, before workers spawn.
-
-        Fixes https://github.com/ultralytics/ultralytics/issues/9824 — replaces the legacy lazy
-        write-back that triggered per-worker copy-on-write on fork and full-pickle bloat on spawn.
-        """
+    def cache_images(self) -> None:
+        """Preload all images into a shared-memory uint8 tensor before DataLoader workers spawn."""
         n = len(self.samples)
         gb = 1 << 30
         self.img_cache = torch.empty((n, self.imgsz, self.imgsz, 3), dtype=torch.uint8)
 
-        def _load_one(i: int):
+        def load_one(i: int):
             im = cv2.imread(self.samples[i][0])
             if im.shape[:2] != (self.imgsz, self.imgsz):
                 im = cv2.resize(im, (self.imgsz, self.imgsz), interpolation=cv2.INTER_LINEAR)
             return i, im
 
         with ThreadPool(NUM_THREADS) as pool:
-            pbar = TQDM(pool.imap(_load_one, range(n)), total=n, disable=LOCAL_RANK > 0)
+            pbar = TQDM(pool.imap(load_one, range(n)), total=n, disable=LOCAL_RANK > 0)
             for i, im in pbar:
                 self.img_cache[i] = torch.from_numpy(im)
                 pbar.desc = f"{self.prefix}Caching images ({self.img_cache.numel() / gb:.1f}GB RAM)"
