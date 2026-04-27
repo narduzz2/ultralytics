@@ -846,7 +846,9 @@ async def convert_ndjson_to_yolo(ndjson_path: str | Path, output_path: str | Pat
 
     # Hash-qualified dirs allow identical datasets to reuse downloads while preventing changed datasets from mutating
     # files that another training job may still be reading.
-    dataset_dir = (ndjson_path.parent / user_path).resolve() if local_mode else output_path / f"{ndjson_path.stem}-{_hash}"
+    dataset_dir = (
+        (ndjson_path.parent / user_path).resolve() if local_mode else output_path / f"{ndjson_path.stem}-{_hash}"
+    )
     yaml_path = dataset_dir / (f"{ndjson_path.stem}.yaml" if local_mode else "data.yaml")
     if yaml_path.is_file():
         try:
