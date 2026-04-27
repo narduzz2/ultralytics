@@ -901,7 +901,7 @@ async def convert_ndjson_to_yolo(ndjson_path: str | Path, output_path: str | Pat
                 r["split"] = "val"
             splits.add("val")
             LOGGER.warning(
-                f"WARNING ⚠️ No 'val' split found in dataset. "
+                f"No 'val' split found in dataset. "
                 f"Auto-splitting {len(train_records)} images into {len(train_records) - val_count} train, {val_count} val. "
                 f"For best results, manually assign validation images in Platform dataset page."
             )
@@ -913,7 +913,7 @@ async def convert_ndjson_to_yolo(ndjson_path: str | Path, output_path: str | Pat
     if _reuse:
         yaml_path.unlink(missing_ok=True)  # Invalidate hash before destructive ops (crash safety)
         if not is_classification and not local_mode:
-            LOGGER.warning(f"WARNING ⚠️ Removing existing labels at {dataset_dir / 'labels'} to rewrite from NDJSON.")
+            LOGGER.warning(f"Removing existing labels at {dataset_dir / 'labels'} to rewrite from NDJSON.")
             shutil.rmtree(dataset_dir / "labels", ignore_errors=True)
     dataset_dir.mkdir(parents=True, exist_ok=True)
     data_yaml = None
