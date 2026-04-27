@@ -355,16 +355,38 @@ class Exporter:
                 model.end2end = False
                 LOGGER.warning(f"{fmt.upper()} export does not support end2end models, disabling end2end branch.")
             if fmt == "engine" and self.args.int8:
-                # TensorRT<=10.3.0 with int8 has known end2end build issues
+                # TensorRT 10.3.0 on JetPack 6 with int8 has known end2end build issues
                 # https://github.com/ultralytics/ultralytics/issues/23841
                 try:
                     import tensorrt as trt
 
-                    if check_version(trt.__version__, "<=10.3.0", hard=True):
-                        model.end2end = False
-                        LOGGER.warning(
-                            "TensorRT<=10.3.0 with int8 has known end2end build issues, disabling end2end branch."
+                    if check_version(trt.__version__, "==10.3.0") and is_jetson(jetpack=6):
+                        LOGGER.info(
+                            "\nTensorRT 10.3.0 on JetPack 6 has known INT8 + end2end build issues. "
+                            "Attempting upgrade from https://developer.nvidia.com/cuda-downloads..."
                         )
+                        try:
+                            sudo = "sudo " if is_sudo_available() else ""
+                            keyring = (
+                                "https://developer.download.nvidia.com/compute/cuda/repos/"
+                                "ubuntu2204/arm64/cuda-keyring_1.1-1_all.deb"
+                            )
+                            for c in (
+                                f"wget -q {keyring} -O /tmp/cuda-keyring.deb",
+                                f"{sudo}dpkg -i /tmp/cuda-keyring.deb",
+                                f"{sudo}apt-get update",
+                                f"{sudo}apt-get install -y tensorrt",
+                            ):
+                                subprocess.run(c, shell=True, check=True)
+                            raise RuntimeError(
+                                "TensorRT upgraded successfully. Please re-run your export "
+                                "command to use the new TensorRT version."
+                            )
+                        except subprocess.CalledProcessError as e:
+                            LOGGER.warning(
+                                f"TensorRT auto-upgrade failed ({e}). Disabling end2end branch as fallback."
+                            )
+                            model.end2end = False
                 except ImportError:
                     pass
         if self.args.half and self.args.int8:
