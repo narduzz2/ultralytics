@@ -15,7 +15,6 @@ from typing import Any
 import cv2
 import numpy as np
 import torch
-from PIL import Image
 from torch.utils.data import Dataset
 
 from ultralytics.data.utils import FORMATS_HELP_MSG, HELP_URL, IMG_FORMATS, check_file_speeds
@@ -137,13 +136,15 @@ class BaseDataset(Dataset):
         self.ims, self.im_hw0, self.im_hw = [None] * self.ni, [None] * self.ni, [None] * self.ni
         self.npy_files = [Path(f).with_suffix(".npy") for f in self.im_files]
         self.cache = cache.lower() if isinstance(cache, str) else "ram" if cache is True else None
-        # Shared RAM cache: single torch.uint8 buffer pinned via share_memory_() before workers fork.
-        # Cache is built using the subclass's load_image rect_mode default (e.g. RTDETRDataset overrides to False
-        # for square resize). The fast path serves only callers requesting that same mode; others fall through
-        # to decode so cache shape always matches the requested resize.
+        # Shared RAM cache: single torch.uint8 byte buffer pinned via share_memory_() before workers fork.
+        # The buffer holds raw bytes; per-image dtype is tracked so the fast path can view bytes back with the
+        # correct dtype (supports uint8 JPG/PNG and uint16 TIFF alike). Cache is built using the subclass's
+        # load_image rect_mode default (e.g. RTDETRDataset overrides to False for square resize) and the same
+        # imread() decoder used at runtime, so probe and load can never disagree on shape/dtype/channels.
         self.img_cache = None
         self.img_offsets = None
         self.img_shapes = None
+        self.img_dtypes = None
         self._cache_rect_mode = inspect.signature(self.load_image).parameters["rect_mode"].default
         # safety_margin=1.0 budgets ~2x cache size to absorb streaming/heap-fragmentation overhead
         if self.cache == "ram" and self.check_cache_ram(safety_margin=1.0):
@@ -241,7 +242,9 @@ class BaseDataset(Dataset):
         if rect_mode == self._cache_rect_mode and self.cache == "ram" and self.img_cache is not None:
             offset = self.img_offsets[i]
             h, w, c = self.img_shapes[i]
-            im = self.img_cache[offset : offset + h * w * c].numpy().reshape(h, w, c).copy()
+            dtype = self.img_dtypes[i]
+            nb = h * w * c * dtype.itemsize
+            im = self.img_cache[offset : offset + nb].numpy().view(dtype).reshape(h, w, c).copy()
             return im, self.im_hw0[i], (h, w)
 
         im, f, fn = self.ims[i], self.im_files[i], self.npy_files[i]
@@ -304,13 +307,13 @@ class BaseDataset(Dataset):
         n = self.ni
 
         def probe(i: int):
-            # Re-raise PIL header read failures as FileNotFoundError so the outer handler propagates them
-            # cleanly instead of swallowing into the generic OSError/SHM warning.
-            try:
-                with Image.open(self.im_files[i]) as img:
-                    w0, h0 = img.size
-            except OSError as e:
-                raise FileNotFoundError(f"Image Not Found {self.im_files[i]} ({type(e).__name__}: {e})") from e
+            # Use imread (same decoder as the load pass) so probe and load can't disagree on shape/dtype/channels.
+            # Multi-frame TIFFs, uint16 TIFFs, and EXIF-rotated JPGs all surface here exactly as they will at
+            # runtime, which keeps self.img_shapes/self.img_dtypes faithful to the bytes we'll write into cache.
+            im = imread(self.im_files[i], flags=self.cv2_flag)
+            if im is None:
+                raise FileNotFoundError(f"Image Not Found {self.im_files[i]}")
+            h0, w0 = im.shape[:2]
             if self._cache_rect_mode:
                 r = self.imgsz / max(h0, w0)
                 if r != 1:
@@ -320,7 +323,8 @@ class BaseDataset(Dataset):
                     w, h = w0, h0
             else:
                 w, h = self.imgsz, self.imgsz
-            return i, (h0, w0), (h, w, self.channels)
+            c = im.shape[2] if im.ndim == 3 else 1
+            return i, (h0, w0), (h, w, c), im.dtype, h * w * c * im.dtype.itemsize
 
         def load(i: int):
             im = imread(self.im_files[i], flags=self.cv2_flag)
@@ -342,27 +346,32 @@ class BaseDataset(Dataset):
             shapes = [(0, 0, 0)] * n
             hw0 = [(0, 0)] * n
             hw = [(0, 0)] * n
+            dtypes: list[np.dtype | None] = [None] * n
+            nbytes_per = [0] * n
             with ThreadPool(NUM_THREADS) as pool:
                 pbar = TQDM(pool.imap(probe, range(n)), total=n, disable=LOCAL_RANK > 0)
-                for i, h0w0, shp in pbar:
+                for i, h0w0, shp, dt, nb in pbar:
                     hw0[i] = h0w0
                     shapes[i] = shp
                     hw[i] = shp[:2]  # (h, w) resized
+                    dtypes[i] = dt
+                    nbytes_per[i] = nb
                     pbar.desc = f"{self.prefix}Probing image sizes"
                 pbar.close()
 
             offsets = [0] * n
             pos = 0
-            for i, (h, w, c) in enumerate(shapes):
+            for i, nb in enumerate(nbytes_per):
                 offsets[i] = pos
-                pos += h * w * c
+                pos += nb
 
             cache = torch.empty(pos, dtype=torch.uint8)
             with ThreadPool(NUM_THREADS) as pool:
                 pbar = TQDM(pool.imap(load, range(n)), total=n, disable=LOCAL_RANK > 0)
                 for i, im in pbar:
-                    sz = im.nbytes
-                    cache[offsets[i] : offsets[i] + sz] = torch.from_numpy(np.ascontiguousarray(im).reshape(-1))
+                    raw = np.ascontiguousarray(im).view(np.uint8).reshape(-1)
+                    sz = raw.nbytes
+                    cache[offsets[i] : offsets[i] + sz] = torch.from_numpy(raw)
                     b += sz
                     pbar.desc = f"{self.prefix}Caching images ({b / gb:.1f}GB RAM)"
                 pbar.close()
@@ -381,6 +390,7 @@ class BaseDataset(Dataset):
         self.img_cache = cache
         self.img_offsets = offsets
         self.img_shapes = shapes
+        self.img_dtypes = dtypes
         self.im_hw0 = hw0
         self.im_hw = hw
 
