@@ -362,6 +362,25 @@ def check_python(minimum: str = "3.8.0", hard: bool = True, verbose: bool = Fals
 
 
 @TryExcept()
+def install_deb(url: str, tmpdir: str | Path, label: str) -> None:
+    """Download a `.deb` package from a URL and install it with ``sudo dpkg -i``.
+
+    Args:
+        url (str): Direct download URL of the `.deb` file.
+        tmpdir (str | Path): Temporary directory to store the downloaded file.
+        label (str): Human-readable label for log messages (e.g. ``"NPU driver"``).
+    """
+    sudo = "sudo " if is_sudo_available() else ""
+    deb_path = Path(tmpdir) / Path(url).name
+    try:
+        LOGGER.info(f"Downloading {label} from {url}...")
+        subprocess.run(["wget", "-O", str(deb_path), url], check=True, timeout=120)
+        LOGGER.info(f"Installing {label}...")
+        subprocess.run(f"{sudo}dpkg -i {deb_path}".split(), check=True)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+        LOGGER.warning(f"{label} installation failed (non-fatal): {e}")
+
+
 def check_apt_requirements(requirements):
     """Check if apt packages are installed and install missing ones.
 
