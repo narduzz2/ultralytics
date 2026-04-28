@@ -159,7 +159,7 @@ def export_formats():
         ["RKNN", "rknn", "_rknn_model", False, False, ["batch", "name"]],
         ["ExecuTorch", "executorch", "_executorch_model", True, False, ["batch"]],
         ["Axelera", "axelera", "_axelera_model", False, False, ["batch", "int8", "fraction"]],
-        ["DeepX", "deepx", "_deepx_model", False, False, ["batch", "int8", "fraction"]],
+        ["DeepX", "deepx", "_deepx_model", False, False, ["batch", "int8", "fraction", "data", "opt_level"]],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments"], zip(*x)))
 
