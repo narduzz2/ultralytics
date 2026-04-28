@@ -159,7 +159,7 @@ def export_formats():
         ["RKNN", "rknn", "_rknn_model", False, False, ["batch", "name"]],
         ["ExecuTorch", "executorch", "_executorch_model", True, False, ["batch"]],
         ["Axelera AI", "axelera", "_axelera_model", False, False, ["batch", "int8", "fraction", "data"]],
-        ["LiteRT", "litert", "_litert_model", True, False, ["batch", "int8"]],
+        ["LiteRT", "litert", "_litert_model", True, False, ["batch", "half", "int8"]],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments"], zip(*x)))
 
@@ -759,7 +759,7 @@ class Exporter:
 
     @try_export
     def export_litert(self, prefix=colorstr("LiteRT:")):
-        """Export YOLO model to LiteRT format using litert_torch with optional INT8 quantization."""
+        """Export YOLO model to LiteRT format using litert_torch with optional FP16/INT8 quantization."""
         assert LINUX and not MACOS and not WINDOWS and not ARM64, "LiteRT export only supported on Linux x86"
         from ultralytics.utils.export.litert import torch2litert
 
@@ -767,6 +767,7 @@ class Exporter:
             self.model,
             self.im,
             self.file,
+            half=self.args.half,
             int8=self.args.int8,
             metadata=self.metadata,
             prefix=prefix,
