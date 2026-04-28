@@ -717,7 +717,7 @@ class SemsegDataset(BaseDataset):
         self.mask_files = []
         self.mask_ims = []
         self.mask_npy_files = []
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
 
     def _parse_label_mapping(self, mapping):
         """Normalize label_mapping entries from dataset YAML into integer-to-integer ids."""
@@ -1097,7 +1097,7 @@ class SemsegDataset(BaseDataset):
         nc = self.data.get("nc", len(self.data.get("names", [])))
         if self.augment:
             transforms.append(SemsegRandomScale(scale_min=0.5, scale_max=2.0))
-            transforms.append(SemsegRandomCrop(crop_size=int(self.imgsz), ignore_label=255 if nc > 1 else 0))
+            transforms.append(SemsegRandomCrop(crop_size=int(self.imgsz), ignore_label=self.ignore_label if nc > 1 else 0))
             transforms.append(RandomFlip(p=0.5, direction="horizontal"))
             transforms.append(PhotoMetricDistortion(
                 brightness_delta=12,
@@ -1106,7 +1106,7 @@ class SemsegDataset(BaseDataset):
                 hue_delta=0,
                 ))
         else:
-            transforms.append(LetterBox(auto=False, scaleup=False, center=False, stride=self.stride, ignore_label=255 if nc > 1 else 0))
+            transforms.append(LetterBox(auto=False, scaleup=False, center=False, stride=self.stride, ignore_label=self.ignore_label if nc > 1 else 0))
         transforms.append(SemanticFormat())
         return Compose(transforms)
 
@@ -1233,14 +1233,17 @@ class SemanticFormat:
         mask = labels.get("semantic_mask")
 
         if img is not None:
+            if img.ndim == 2:  # grayscale dropped to 2D by upstream cv2 ops (resize/flip/copyMakeBorder)
+                img = img[..., None]
             h, w = img.shape[:2]
 
             # Resize mask to match letterboxed image dimensions
             if mask is not None and (mask.shape[0] != h or mask.shape[1] != w):
                 mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
 
-            # Convert image: HWC -> CHW, BGR -> RGB, uint8 -> float32
-            img = np.ascontiguousarray(img.transpose(2, 0, 1)[::-1])  # BGR to RGB, HWC to CHW
+            # Convert image: HWC -> CHW, BGR -> RGB (only for 3-channel), uint8 -> float32
+            img = img.transpose(2, 0, 1)
+            img = np.ascontiguousarray(img[::-1] if img.shape[0] == 3 else img)
             labels["img"] = torch.from_numpy(img).float()
         else:
             labels["img"] = torch.zeros(3, 640, 640)

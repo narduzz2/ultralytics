@@ -1816,11 +1816,12 @@ class PhotoMetricDistortion:
         if mode == 1:
             img = self.contrast(img)
 
-        # random saturation
-        img = self.saturation(img)
+        if img.shape[-1] == 3:  # saturation/hue only apply to RGB images
+            # random saturation
+            img = self.saturation(img)
 
-        # random hue
-        img = self.hue(img)
+            # random hue
+            img = self.hue(img)
 
         # random contrast
         if mode == 0:
