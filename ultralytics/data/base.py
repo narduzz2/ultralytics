@@ -229,11 +229,14 @@ class BaseDataset(Dataset):
         Raises:
             FileNotFoundError: If the image file is not found.
         """
-        # Shared RAM cache: zero-copy view into the pinned torch tensor (workers map the same SHM region)
-        if self.cache == "ram" and self.img_cache is not None:
+        # Shared RAM cache fast path: workers map the same SHM region. Gated on rect_mode=True because the cache
+        # stores aspect-ratio-preserving resizes; rect_mode=False (e.g. RTDETRDataset) wants a square resize and must
+        # fall through to the decode path. .copy() prevents in-place augmentations (e.g. RandomHSV cv2.cvtColor with
+        # dst=img) from mutating the shared backing tensor and corrupting the cache for other workers.
+        if rect_mode and self.cache == "ram" and self.img_cache is not None:
             offset = self.img_offsets[i]
             h, w, c = self.img_shapes[i]
-            im = self.img_cache[offset : offset + h * w * c].numpy().reshape(h, w, c)
+            im = self.img_cache[offset : offset + h * w * c].numpy().reshape(h, w, c).copy()
             return im, self.im_hw0[i], (h, w)
 
         im, f, fn = self.ims[i], self.im_files[i], self.npy_files[i]
