@@ -285,46 +285,39 @@ class BaseDataset(Dataset):
         return self.ims[i], self.im_hw0[i], self.im_hw[i]
 
     def cache_images(self) -> None:
-        """Cache images to memory (shared torch.uint8 tensor) or disk (*.npy files) for faster training.
+        """Cache images to memory (shared byte buffer) or disk (*.npy files) for faster training.
 
-        For ``cache='ram'`` a two-pass design is used to avoid ~2x peak overhead of holding decoded numpy arrays in a
-        Python list while building the cache: pass 1 reads only image headers (no decode) to compute byte offsets,
-        pass 2 decodes and streams each image directly into the pre-allocated buffer. The buffer is then pinned with
-        ``share_memory_()`` so all DataLoader workers map the same POSIX shared-memory region instead of duplicating
-        the cache per worker (which is the source of the ``num_workers > 0`` leak).
+        ``cache='ram'`` builds a single ``torch.uint8`` buffer in two passes (probe shapes, then decode + stream)
+        and pins it with ``share_memory_()`` so all DataLoader workers map the same POSIX shared-memory region
+        instead of duplicating the cache per worker (the source of the ``num_workers > 0`` leak). imread is used
+        in both passes so probe and load can't disagree on shape/dtype/channels (matters for multi-frame TIFFs,
+        uint16 TIFFs, EXIF-rotated JPGs, etc.).
         """
-        b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
+        b, gb = 0, 1 << 30
         if self.cache == "disk":
             with ThreadPool(NUM_THREADS) as pool:
-                results = pool.imap(self.cache_images_to_disk, range(self.ni))
-                pbar = TQDM(enumerate(results), total=self.ni, disable=LOCAL_RANK > 0)
+                pbar = TQDM(
+                    enumerate(pool.imap(self.cache_images_to_disk, range(self.ni))),
+                    total=self.ni,
+                    disable=LOCAL_RANK > 0,
+                )
                 for i, _ in pbar:
                     b += self.npy_files[i].stat().st_size
                     pbar.desc = f"{self.prefix}Caching images ({b / gb:.1f}GB Disk)"
                 pbar.close()
             return
 
-        n = self.ni
-
         def probe(i: int):
-            # Use imread (same decoder as the load pass) so probe and load can't disagree on shape/dtype/channels.
-            # Multi-frame TIFFs, uint16 TIFFs, and EXIF-rotated JPGs all surface here exactly as they will at
-            # runtime, which keeps self.img_shapes/self.img_dtypes faithful to the bytes we'll write into cache.
             im = imread(self.im_files[i], flags=self.cv2_flag)
             if im is None:
                 raise FileNotFoundError(f"Image Not Found {self.im_files[i]}")
             h0, w0 = im.shape[:2]
-            if self._cache_rect_mode:
-                r = self.imgsz / max(h0, w0)
-                if r != 1:
-                    w = min(math.ceil(w0 * r), self.imgsz)
-                    h = min(math.ceil(h0 * r), self.imgsz)
-                else:
-                    w, h = w0, h0
+            if self._cache_rect_mode and (r := self.imgsz / max(h0, w0)) != 1:
+                w, h = min(math.ceil(w0 * r), self.imgsz), min(math.ceil(h0 * r), self.imgsz)
             else:
-                w, h = self.imgsz, self.imgsz
+                h, w = (h0, w0) if self._cache_rect_mode else (self.imgsz, self.imgsz)
             c = im.shape[2] if im.ndim == 3 else 1
-            return i, (h0, w0), (h, w, c), im.dtype, h * w * c * im.dtype.itemsize
+            return i, (h0, w0), (h, w, c), im.dtype
 
         def load(i: int):
             im = imread(self.im_files[i], flags=self.cv2_flag)
@@ -334,45 +327,33 @@ class BaseDataset(Dataset):
             if self._cache_rect_mode:
                 r = self.imgsz / max(h0, w0)
                 if r != 1:
-                    w, h = (min(math.ceil(w0 * r), self.imgsz), min(math.ceil(h0 * r), self.imgsz))
-                    im = cv2.resize(im, (w, h), interpolation=cv2.INTER_LINEAR)
+                    im = cv2.resize(
+                        im,
+                        (min(math.ceil(w0 * r), self.imgsz), min(math.ceil(h0 * r), self.imgsz)),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
             elif not (h0 == w0 == self.imgsz):
                 im = cv2.resize(im, (self.imgsz, self.imgsz), interpolation=cv2.INTER_LINEAR)
-            if im.ndim == 2:
-                im = im[..., None]
-            return i, im
+            return i, im if im.ndim == 3 else im[..., None]
 
+        n = self.ni
         try:
-            shapes = [(0, 0, 0)] * n
-            hw0 = [(0, 0)] * n
-            hw = [(0, 0)] * n
-            dtypes: list[np.dtype | None] = [None] * n
-            nbytes_per = [0] * n
+            shapes, hw0, dtypes, offsets, pos = [None] * n, [(0, 0)] * n, [None] * n, [0] * n, 0
             with ThreadPool(NUM_THREADS) as pool:
                 pbar = TQDM(pool.imap(probe, range(n)), total=n, disable=LOCAL_RANK > 0)
-                for i, h0w0, shp, dt, nb in pbar:
-                    hw0[i] = h0w0
-                    shapes[i] = shp
-                    hw[i] = shp[:2]  # (h, w) resized
-                    dtypes[i] = dt
-                    nbytes_per[i] = nb
+                for i, h0w0, shp, dt in pbar:
+                    hw0[i], shapes[i], dtypes[i], offsets[i] = h0w0, shp, dt, pos
+                    pos += shp[0] * shp[1] * shp[2] * dt.itemsize
                     pbar.desc = f"{self.prefix}Probing image sizes"
                 pbar.close()
-
-            offsets = [0] * n
-            pos = 0
-            for i, nb in enumerate(nbytes_per):
-                offsets[i] = pos
-                pos += nb
 
             cache = torch.empty(pos, dtype=torch.uint8)
             with ThreadPool(NUM_THREADS) as pool:
                 pbar = TQDM(pool.imap(load, range(n)), total=n, disable=LOCAL_RANK > 0)
                 for i, im in pbar:
                     raw = np.ascontiguousarray(im).view(np.uint8).reshape(-1)
-                    sz = raw.nbytes
-                    cache[offsets[i] : offsets[i] + sz] = torch.from_numpy(raw)
-                    b += sz
+                    cache[offsets[i] : offsets[i] + raw.nbytes] = torch.from_numpy(raw)
+                    b += raw.nbytes
                     pbar.desc = f"{self.prefix}Caching images ({b / gb:.1f}GB RAM)"
                 pbar.close()
 
@@ -392,7 +373,7 @@ class BaseDataset(Dataset):
         self.img_shapes = shapes
         self.img_dtypes = dtypes
         self.im_hw0 = hw0
-        self.im_hw = hw
+        self.im_hw = [s[:2] for s in shapes]
 
     def cache_images_to_disk(self, i: int) -> None:
         """Save an image as an *.npy file for faster loading."""
