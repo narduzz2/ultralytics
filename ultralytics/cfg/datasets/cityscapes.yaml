@@ -1,17 +1,22 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
 # Cityscapes semantic segmentation dataset (19 classes)
 # Documentation: https://www.cityscapes-dataset.com/
+# Example usage: yolo train data=cityscapes.yaml
+# parent
+# ├── ultralytics
+# └── datasets
+#     └── cityscapes ← downloads here (11 GB)
+#         └── images
+#         └── masks
 
 # Dataset root directory
-path: cityscapes
-train: images/train
-val: images/val
-test: images/test
+path: cityscapes # dataset root dir
+train: images/train # train images (relative to 'path') 2975 images
+val: images/val # val images (relative to 'path') 500 images
+test: images/test # test images (relative to 'path') 1525 images
 
-# Semantic mask directory (PNG files, pixel values = class IDs 0-18, 255 = ignore/void)
-masks_dir: masks
-crop_size: 1024
-size_range: [1024, 2048]
+masks_dir: masks # mask dir (PNG files, pixel values = class IDs 0-18, 255 = ignore/void)
 
 # Cityscapes 19-class labels
 names:
@@ -35,6 +40,7 @@ names:
   17: motorcycle
   18: bicycle
 
+# mapping from labelIDs to trainIDs, ignore_label=255
 label_mapping:
   -1: ignore_label
   0: ignore_label
