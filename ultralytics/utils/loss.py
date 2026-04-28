@@ -1280,9 +1280,11 @@ class SemanticSegmentationLoss(nn.Module):
         if self.nc == 1:
             self.ce = nn.BCEWithLogitsLoss()
         else:
-            self.ce = nn.CrossEntropyLoss(
-                ignore_index=255, weight=torch.from_numpy(CITYSCAPES_WEIGHT) if self.use_cityscapes_weight else None
-            ).to(device=self.device, dtype=self.dtype)
+            self.ce = nn.CrossEntropyLoss(ignore_index=255).to(device=self.device, dtype=self.dtype)
+            if self.use_cityscapes_weight:
+                # Non-persistent: weight is a deterministic constant, no need to serialize into ckpt state_dict.
+                weight = torch.from_numpy(CITYSCAPES_WEIGHT).to(device=self.device, dtype=self.dtype)
+                self.ce.register_buffer("weight", weight, persistent=False)
 
     def _resize_masks(self, masks, target_shape):
         """Resize masks to match prediction spatial dims."""
