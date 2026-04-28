@@ -360,8 +360,17 @@ class Results(SimpleClass, DataExportMixin):
         r = self.new()
         for k in self._keys:
             v = getattr(self, k)
-            if v is not None:
-                setattr(r, k, getattr(v, fn)(*args, **kwargs))
+            if v is None:
+                continue
+            if k == "semantic_mask":
+                # Raw torch.Tensor / np.ndarray (no BaseTensor wrapper)
+                if fn in {"cpu", "numpy"}:
+                    v = getattr(v, fn)() if isinstance(v, torch.Tensor) else v
+                else:  # cuda, to
+                    v = getattr(torch.as_tensor(v), fn)(*args, **kwargs)
+            else:
+                v = getattr(v, fn)(*args, **kwargs)
+            setattr(r, k, v)
         return r
 
     def cpu(self):
@@ -699,7 +708,11 @@ class Results(SimpleClass, DataExportMixin):
             - The function will create the output directory if it does not exist.
             - If save_conf is False, the confidence scores will be excluded from the output.
             - Existing contents of the file will not be overwritten; new results will be appended.
+            - This method does not support Semantic Segmentation tasks.
         """
+        if self.semantic_mask is not None:
+            LOGGER.warning("Semantic Segmentation task does not support `save_txt`.")
+            return str(txt_file)
         is_obb = self.obb is not None
         boxes = self.obb if is_obb else self.boxes
         masks = self.masks
@@ -746,7 +759,7 @@ class Results(SimpleClass, DataExportMixin):
             ...     result.save_crop(save_dir="path/to/crops", file_name="detection")
 
         Notes:
-            - This method does not support Classify or Oriented Bounding Box (OBB) tasks.
+            - This method does not support Classify, Oriented Bounding Box (OBB), or Semantic Segmentation tasks.
             - Crops are saved as 'save_dir/class_name/file_name.jpg'.
             - The method will create necessary subdirectories if they don't exist.
             - Original image is copied before cropping to avoid modifying the original.
@@ -756,6 +769,9 @@ class Results(SimpleClass, DataExportMixin):
             return
         if self.obb is not None:
             LOGGER.warning("OBB task does not support `save_crop`.")
+            return
+        if self.semantic_mask is not None:
+            LOGGER.warning("Semantic Segmentation task does not support `save_crop`.")
             return
         for d in self.boxes:
             save_one_box(
@@ -799,6 +815,25 @@ class Results(SimpleClass, DataExportMixin):
                         "name": self.names[class_id],
                         "class": class_id,
                         "confidence": round(conf, decimals),
+                    }
+                )
+            return results
+
+        if self.semantic_mask is not None:
+            # Return per-class pixel coverage for semantic segmentation
+            mask = self.semantic_mask
+            if isinstance(mask, torch.Tensor):
+                mask = mask.cpu().numpy()
+            unique, counts = np.unique(mask, return_counts=True)
+            total = mask.size
+            for class_id, count in zip(unique.tolist(), counts.tolist()):
+                if class_id not in self.names:  # skip ignore label (e.g., 255)
+                    continue
+                results.append(
+                    {
+                        "name": self.names[class_id],
+                        "class": class_id,
+                        "pixel_ratio": round(count / total, decimals),
                     }
                 )
             return results
