@@ -137,9 +137,9 @@ class BaseDataset(Dataset):
         self.npy_files = [Path(f).with_suffix(".npy") for f in self.im_files]
         self.cache = cache.lower() if isinstance(cache, str) else "ram" if cache is True else None
         # Shared RAM cache: single torch.uint8 buffer pinned via share_memory_() before workers fork
-        self.img_cache: torch.Tensor | None = None
-        self.img_offsets: list[int] | None = None
-        self.img_shapes: list[tuple[int, int, int]] | None = None
+        self.img_cache = None
+        self.img_offsets = None
+        self.img_shapes = None
         # safety_margin=1.0 budgets ~2x cache size to absorb streaming/heap-fragmentation overhead
         if self.cache == "ram" and self.check_cache_ram(safety_margin=1.0):
             if hyp.deterministic:
@@ -308,6 +308,8 @@ class BaseDataset(Dataset):
 
         def load(i: int):
             im = imread(self.im_files[i], flags=self.cv2_flag)
+            if im is None:
+                raise FileNotFoundError(f"Image Not Found {self.im_files[i]}")
             h0, w0 = im.shape[:2]
             r = self.imgsz / max(h0, w0)
             if r != 1:
@@ -320,11 +322,13 @@ class BaseDataset(Dataset):
         try:
             shapes = [(0, 0, 0)] * n
             hw0 = [(0, 0)] * n
+            hw = [(0, 0)] * n
             with ThreadPool(NUM_THREADS) as pool:
                 pbar = TQDM(pool.imap(probe, range(n)), total=n, disable=LOCAL_RANK > 0)
                 for i, h0w0, shp in pbar:
                     hw0[i] = h0w0
                     shapes[i] = shp
+                    hw[i] = shp[:2]  # (h, w) resized
                     pbar.desc = f"{self.prefix}Probing image sizes"
                 pbar.close()
 
@@ -345,6 +349,8 @@ class BaseDataset(Dataset):
                 pbar.close()
 
             cache.share_memory_()
+        except FileNotFoundError:
+            raise  # surface corrupt/missing image clearly instead of swallowing as cache fallback
         except (MemoryError, OSError, RuntimeError) as e:
             LOGGER.warning(
                 f"{self.prefix}cache='ram' disabled: {type(e).__name__}: {e}. "
@@ -357,6 +363,7 @@ class BaseDataset(Dataset):
         self.img_offsets = offsets
         self.img_shapes = shapes
         self.im_hw0 = hw0
+        self.im_hw = hw
 
     def cache_images_to_disk(self, i: int) -> None:
         """Save an image as an *.npy file for faster loading."""
