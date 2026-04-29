@@ -28,14 +28,14 @@ class SemanticSegmentationValidator(BaseValidator):
         metrics (SemanticMetrics): Metrics calculator for semantic segmentation.
 
     Examples:
-        >>> from ultralytics.models.yolo.semseg import SemanticValidator
+        >>> from ultralytics.models.yolo.semseg import SemanticSegmentationValidator
         >>> args = dict(model="yolo26n-semseg.pt", data="cityscapes8.yaml")
-        >>> validator = SemanticValidator(args=args)
+        >>> validator = SemanticSegmentationValidator(args=args)
         >>> validator()
     """
 
     def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks=None):
-        """Initialize SemanticValidator.
+        """Initialize SemanticSegmentationValidator.
 
         Args:
             dataloader (DataLoader, optional): DataLoader for validation.
@@ -191,7 +191,7 @@ class SemanticSegmentationValidator(BaseValidator):
             batch (int, optional): Batch size.
 
         Returns:
-            (SemanticDataset): Dataset object.
+            (SemsegDataset): Dataset object.
         """
         use_rect = mode == "val"
         return SemsegDataset(

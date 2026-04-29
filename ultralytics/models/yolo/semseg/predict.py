@@ -20,14 +20,14 @@ class SemanticSegmentationPredictor(BasePredictor):
     This predictor processes model outputs to produce per-pixel class label maps.
 
     Examples:
-        >>> from ultralytics.models.yolo.semseg import SemanticPredictor
+        >>> from ultralytics.models.yolo.semseg import SemanticSegmentationPredictor
         >>> args = dict(model="yolo26n-semseg.pt", source="path/to/image.jpg")
-        >>> predictor = SemanticPredictor(overrides=args)
+        >>> predictor = SemanticSegmentationPredictor(overrides=args)
         >>> predictor.predict_cli()
     """
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
-        """Initialize SemanticPredictor.
+        """Initialize SemanticSegmentationPredictor.
 
         Args:
             cfg (dict): Configuration for the predictor.

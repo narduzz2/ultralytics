@@ -704,7 +704,7 @@ class SemsegDataset(BaseDataset):
     """
 
     def __init__(self, *args, data=None, **kwargs):
-        """Initialize SemanticDataset.
+        """Initialize SemsegDataset.
 
         Args:
             *args: Arguments passed to BaseDataset.

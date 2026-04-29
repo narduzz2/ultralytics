@@ -26,14 +26,14 @@ class SemanticSegmentationTrainer(BaseTrainer):
     model initialization, and validation setup.
 
     Examples:
-        >>> from ultralytics.models.yolo.semseg import SemanticTrainer
+        >>> from ultralytics.models.yolo.semseg import SemanticSegmentationTrainer
         >>> args = dict(model="yolo26n-semseg.yaml", data="cityscapes8.yaml", epochs=3)
-        >>> trainer = SemanticTrainer(overrides=args)
+        >>> trainer = SemanticSegmentationTrainer(overrides=args)
         >>> trainer.train()
     """
 
     def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
-        """Initialize SemanticTrainer.
+        """Initialize SemanticSegmentationTrainer.
 
         Args:
             cfg (dict): Configuration dictionary with default training settings.
@@ -54,7 +54,7 @@ class SemanticSegmentationTrainer(BaseTrainer):
             batch (int, optional): Batch size for rect mode.
 
         Returns:
-            (SemanticDataset): Semantic segmentation dataset.
+            (SemsegDataset): Semantic segmentation dataset.
         """
         use_rect = mode == "val"
         return SemsegDataset(
@@ -96,7 +96,7 @@ class SemanticSegmentationTrainer(BaseTrainer):
         )
 
     def get_model(self, cfg=None, weights=None, verbose=True):
-        """Return a SemanticModel with optional pretrained backbone.
+        """Return a SemanticSegmentationModel with optional pretrained backbone.
 
         Args:
             cfg (str, optional): Path to model configuration file.
@@ -104,7 +104,7 @@ class SemanticSegmentationTrainer(BaseTrainer):
             verbose (bool): Whether to display model information.
 
         Returns:
-            (SemanticModel): Semantic segmentation model.
+            (SemanticSegmentationModel): Semantic segmentation model.
         """
         model = SemanticSegmentationModel(cfg, nc=self.data["nc"], ch=self.data.get("channels", 3), verbose=verbose and RANK == -1)
         if weights:
@@ -125,7 +125,7 @@ class SemanticSegmentationTrainer(BaseTrainer):
         return model
 
     def get_validator(self):
-        """Return a SemanticValidator for model evaluation."""
+        """Return a SemanticSegmentationValidator for model evaluation."""
         self.loss_names = "ce_loss", "dice_loss", "aux_loss"
         return yolo.semseg.SemanticSegmentationValidator(
             self.test_loader, save_dir=self.save_dir, args=copy(self.args), _callbacks=self.callbacks

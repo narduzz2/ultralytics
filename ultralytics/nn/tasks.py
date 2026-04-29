@@ -592,7 +592,7 @@ class SemanticSegmentationModel(BaseModel):
 
     Examples:
         Initialize a semantic segmentation model
-        >>> model = SemanticModel("yolo26n-semseg.yaml", ch=3, nc=19)
+        >>> model = SemanticSegmentationModel("yolo26n-semseg.yaml", ch=3, nc=19)
     """
 
     def __init__(self, cfg="yolo26n-semseg.yaml", ch=3, nc=None, verbose=True):
