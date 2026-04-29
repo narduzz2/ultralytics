@@ -6,13 +6,15 @@ import math
 import random
 from copy import copy
 
+import torch
+from torch import nn, optim
+
 from ultralytics.models.yolo.detect import DetectionTrainer
 from ultralytics.nn.tasks import RTDETRDetectionModel
+from ultralytics.optim.muon import MuSGD
 from ultralytics.utils import LOGGER, RANK, colorstr
 from ultralytics.utils.class_map import resolve_names
-from torch import nn, optim
-from ultralytics.optim.muon import MuSGD
-import torch
+from ultralytics.utils.torch_utils import unwrap_model
 
 from .val import RTDETRDataset, RTDETRValidator
 
@@ -337,8 +339,7 @@ class RTDETRTrainer(DetectionTrainer):
         if "ddf" in loss_gain:
             loss_names.append("ddf_loss")
         # Add o2m loss names if one_to_many_groups > 0
-        # Handle DDP wrapper: use .module to get underlying model if wrapped
-        model = getattr(self.model, "module", self.model)
+        model = unwrap_model(self.model)
         if getattr(model.model[-1], "one_to_many_groups", 0) > 0:
             loss_names.extend(["giou_o2m", "cls_o2m", "l1_o2m"])
         self.loss_names = tuple(loss_names)

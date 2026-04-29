@@ -573,7 +573,7 @@ class RTDETRDEIMTrainer(RTDETRTrainer):
             loss_names.append("fgl_loss")
         if "ddf" in loss_gain:
             loss_names.append("ddf_loss")
-        model = getattr(self.model, "module", self.model)
+        model = unwrap_model(self.model)
         if getattr(model.model[-1], "one_to_many_groups", 0) > 0:
             loss_names.extend(["giou_o2m", "cls_o2m", "l1_o2m"])
         self.loss_names = tuple(loss_names)
