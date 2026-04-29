@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 # =============================================================================
 # SELECT DEFAULT BENCHMARK HERE: "m5", "m5_new", "m5_coreml", "xeon", "xeon_new", "t4",
-# "t4_deimv2_xl_obj365_analysis", "rf_compare", "t4_new", "jetson-agx-thor-gpu",
+# "t4_deimv2_xl_obj365_analysis", "t4_deim_backbone_map", "rf_compare", "t4_new", "jetson-agx-thor-gpu",
 # "jetson-agx-thor-cpu", "jetson-agx-orin-gpu", "jetson-agx-orin-cpu",
 # "jetson-orin-nano-super-gpu", or "jetson-orin-nano-super-cpu"
 # =============================================================================
@@ -472,6 +472,18 @@ BENCHMARKS = {
             ],
         },
     },
+    "t4_deim_backbone_map": {
+        "title": "DINOv3/ConvNeXt-S + DEIM: Latency vs mAP (Tesla T4 GPU, TensorRT v10.11)",
+        "legend": {"loc": "center left", "bbox_to_anchor": (1.02, 0.5)},
+        "models": {
+            "DINOv3 Small + DEIM": [
+                ("s", 13.9, {"ap": 57.8, "ap50": 75.0, "ap75": 63.0, "ap_small": 39.2, "ap_medium": 63.0, "ap_large": 75.8}),
+            ],
+            "ConvNeXt-S + DEIM": [
+                ("s", 15.6, {"ap": 57.0, "ap50": 74.5, "ap75": 62.1, "ap_small": 40.3, "ap_medium": 61.9, "ap_large": 74.2}),
+            ],
+        },
+    },
 }
 
 # Marker and label offset config for each model
@@ -506,6 +518,8 @@ MODEL_STYLES = {
     "DEIMv2 (Ultralytics, obj365)": ("p", -12),
     "Decoder Layers": ("o", 8),
     "Queries @ 4L": ("s", -12),
+    "DINOv3 Small + DEIM": ("X", 8),
+    "ConvNeXt-S + DEIM": ("D", -12),
 }
 
 
@@ -581,6 +595,7 @@ def build_plot(output_path: Path, show: bool, metric: str, benchmark_name: str) 
     benchmark_data = BENCHMARKS[benchmark_name]
     models = benchmark_data["models"]
     title = benchmark_data["title"]
+    legend_kwargs = benchmark_data.get("legend", {"loc": "lower right"})
 
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(10, 6), dpi=120)
@@ -601,7 +616,7 @@ def build_plot(output_path: Path, show: bool, metric: str, benchmark_name: str) 
     ax.set_title(title if metric == "ap" else title.replace("mAP", title_metric))
     ax.set_xlabel("Latency (ms)")
     ax.set_ylabel(METRIC_LABELS[metric])
-    ax.legend(frameon=True, loc="lower right", fontsize=9)
+    ax.legend(frameon=True, fontsize=9, **legend_kwargs)
     ax.margins(x=0.05, y=0.08)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
