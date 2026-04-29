@@ -57,6 +57,11 @@ def parse_args():
         "forced to fp32 to avoid overflow (NVIDIA/TensorRT#4723).",
     )
     p.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable experimental debug TensorRT overrides and add a debug tag to output names.",
+    )
+    p.add_argument(
         "--ropefix",
         action="store_true",
         default=False,
@@ -117,7 +122,15 @@ def apply_ropefix(deploy_model, imgsz):
     print(f"[ropefix] precomputed RoPE at H={H}, W={W} (patch_size={patch_size})")
 
 
-def build_engine_fp16(onnx_path, engine_path, workspace=None, half=True, shape=(1, 3, 640, 640), fp32_attn=True):
+def build_engine_fp16(
+    onnx_path,
+    engine_path,
+    workspace=None,
+    half=True,
+    shape=(1, 3, 640, 640),
+    fp32_attn=True,
+    debug=False,
+):
     """Build a TensorRT fp16 engine with DINOv3-safe precision overrides.
 
     DINOv3 ViT backbones use decomposed self-attention (MatMul → Softmax) in
@@ -127,7 +140,8 @@ def build_engine_fp16(onnx_path, engine_path, workspace=None, half=True, shape=(
 
     When ``fp32_attn=True`` (default) this builder pins every Softmax, every
     attention-path MatMul, and every norm-internal Reduce/Pow/Unary/Elementwise
-    to fp32 while keeping the rest of the graph in fp16.
+    to fp32 while keeping the rest of the graph in fp16. When ``debug=True``,
+    decoder residual Add layers are pinned to fp32 as an experimental override.
     """
     import tensorrt as trt
 
@@ -159,6 +173,13 @@ def build_engine_fp16(onnx_path, engine_path, workspace=None, half=True, shape=(
         head_re = re.compile(r"/dec_(score|bbox)_head")
         lqe_re = re.compile(r"/lqe_layers")
         integral_re = re.compile(r"/integral(?:_\d+)?/")
+        # Minimal classification-head pin: only the Linear (MatMul + bias Add)
+        # of each traced dec_score_head. PyTorch ONNX export only emits the
+        # heads that are actually executed, so this hits at most 4 ops total
+        # (dec_score_head.0 for pre_scores + dec_score_head.<eval_idx> for the
+        # final scores). Targets the class-id flip drift identified by per-tensor
+        # probe analysis; bbox-head drift is buffered by the integral softmax.
+        score_head_re = re.compile(r"/dec_score_head\.\d+/(MatMul|Add)$")
         # Layer types that actually do fp16 math. Shape/constant/gather/
         # unsqueeze/concat ops carry metadata; pinning them is a no-op at
         # best and can force spurious reformat layers at worst.
@@ -173,6 +194,11 @@ def build_engine_fp16(onnx_path, engine_path, workspace=None, half=True, shape=(
             trt.LayerType.NORMALIZATION,
             trt.LayerType.SCALE,
         }
+        # All 24 decoder residual Adds (4 layers × 6 Adds)
+        RESIDUAL_ADD_RE = re.compile(r"/model\.22/decoder/layers\.\d+/(?:gateway/)?Add(?:_\d+)?$")
+        # The .clamp(-65504, 65504) safety valve before each decoder norm3.
+        CLIP_RE = re.compile(r"/model\.22/decoder/layers\.\d+/Clip(?:_\d+)?$")
+
         n_pinned = 0
         for i in range(network.num_layers):
             layer = network.get_layer(i)
@@ -192,19 +218,44 @@ def build_engine_fp16(onnx_path, engine_path, workspace=None, half=True, shape=(
                 pin = True
             elif norm_re.search(name) and layer.type == trt.LayerType.ELEMENTWISE and pow_re.search(name):
                 pin = True
-            # Priority A: final decoder heads produce classification logits and
-            # bbox distribution — fp16 drift here directly shifts (conf, cls).
-            # Comparison of fp32 vs pure-fp16 engines showed confidences drop
-            # by up to 0.5 on some detections and class-ids flip — indicates
-            # the head path is the dominant precision leak.
-            # elif head_re.search(name) and layer.type in compute_types:
+            # elif debug and RESIDUAL_ADD_RE.search(name) and layer.type == trt.LayerType.ELEMENTWISE:
             #     pin = True
-            # # Priority B: LQE weights the score by localisation quality.
-            # elif lqe_re.search(name) and layer.type in compute_types:
+            # # Decoder norm3 safety clamp — when fused with surrounding ops by
+            # # Myelin, the clamp can be reordered AFTER an fp16 cast and become
+            # # ineffective. Pin it to ensure clamp runs in fp32 BEFORE narrowing.
+            # elif debug and CLIP_RE.search(name) and layer.type == trt.LayerType.ACTIVATION:
             #     pin = True
-            # # Priority C: distribution integral (softmax + project) turns reg_max
-            # # bins into continuous bbox distances.
-            # elif integral_re.search(name) and layer.type in compute_types:
+            # Priority A: classification path only. Per-tensor probe analysis
+            # showed dec_score_head's MatMul + bias Add carries the drift that
+            # flips argmax on borderline classes (~0.3 mAP). dec_bbox_head drift
+            # is much larger in magnitude but absorbed by integral softmax, so
+            # we DO NOT pin it. Score head Linear is at most 4 ops in ONNX
+            # (dec_score_head.0 for pre_scores + dec_score_head.<eval_idx> for
+            # final scores). 15× cheaper than the broader head_re (62 ops).
+            # DISABLED: empirically did not recover the mAP gap from PyTorch fp16.
+            # elif debug and score_head_re.search(name) and layer.type in {trt.LayerType.MATRIX_MULTIPLY, trt.LayerType.ELEMENTWISE}:
+            #     pin = True
+            # Pin the FULL DEIMRMSNorm body (Pow + ReduceMean + Add(eps) + Sqrt +
+            # Div + 2× Mul) for exact PyTorch .half() parity. The default rules
+            # above only cover Pow/ReduceMean/Sqrt; adding this catches the
+            # remaining Add(eps), Div(rsqrt), and the two elementwise Muls
+            # (x × inv_rms and × scale) — all cheap ELEMENTWISE ops. Per RMSNorm
+            # site: ~7 ops vs 3 with the default rules.
+            elif debug and norm_re.search(name) and layer.type in compute_types:
+                pin = True
+            # Broader head_re (dec_score_head + dec_bbox_head MLPs, 62 ops on XL)
+            # — keep available but commented as the minimal score_head_re is
+            # the data-driven choice from per-tensor probe analysis.
+            # elif debug and head_re.search(name) and layer.type in compute_types:
+            #     pin = True
+            # Priority B: LQE adds quality scores to classification logits.
+            # Drift here shifts class-id rankings on borderline cases.
+            # elif debug and lqe_re.search(name) and layer.type in compute_types:
+            #     pin = True
+            # Priority C: distribution integral (softmax + project) turns
+            # reg_max bins into continuous bbox distances. Less impactful than
+            # head/LQE since high-conf box drift is already <1e-3.
+            # elif debug and integral_re.search(name) and layer.type in compute_types:
             #     pin = True
             if pin:
                 layer.precision = trt.float32
@@ -236,6 +287,8 @@ def build_output_paths(args):
         extra_tags.append(f"nq{args.export_num_queries}")
     if args.format == "engine" and args.half:
         extra_tags.append("nofp32attn" if args.no_fp32_attn else "fp32attn")
+    if args.debug:
+        extra_tags.append("debug")
     suffix = f"_{'_'.join(extra_tags)}" if extra_tags else ""
     base_stem = Path(args.name).stem if args.name else f"{weights_path.stem}_op{args.opset}_{sim_tag}_{rope_tag}"
     base_stem = f"rtdetr_{base_stem}"
@@ -319,7 +372,8 @@ def main():
     export_format = "onnx" if args.format == "engine" else args.format
     print(
         f"Exporting with format={export_format}, imgsz={args.imgsz}, opset={args.opset}, "
-        f"device={args.device}, batch={args.batch}, half={args.half}, simplify={args.simplify}"
+        f"device={args.device}, batch={args.batch}, half={args.half}, "
+        f"simplify={args.simplify}, debug={args.debug}"
     )
     print(f"Intermediate ONNX: {onnx_path}")
     if args.format == "engine":
@@ -345,6 +399,7 @@ def main():
             half=args.half,
             shape=(args.batch, 3, args.imgsz, args.imgsz),
             fp32_attn=not args.no_fp32_attn,
+            debug=args.debug,
         )
         artifact = engine_path
 
