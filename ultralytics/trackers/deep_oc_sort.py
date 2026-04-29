@@ -5,14 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from .basetrack import TrackState
+
 from .byte_tracker import STrack
 from .oc_sort import OCSORT, OCSortTrack
 from .utils import matching
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYAH
 from .utils.reid import ReID
-from .utils.stracks import merge_track_pools
 
 
 class DeepOCSortTrack(OCSortTrack):
@@ -230,197 +229,40 @@ class DeepOCSORT(OCSORT):
             for (xywh, s, c) in zip(bboxes, results.conf, results.cls)
         ]
 
-    def get_dists(self, tracks: list[DeepOCSortTrack], detections: list[DeepOCSortTrack]) -> np.ndarray:
-        """Compute the cost matrix combining IoU, OCM velocity, and (optionally) appearance.
+    # ---- Hooks invoked by OCSORT.update --------------------------------------------------
 
-        Note on paper fidelity: Deep OC-SORT §3.3 prescribes an *additive* per-pair weighted
-        appearance term (cost = IoU + w(conf) · emb_cost). This implementation uses BoT-SORT's
-        `min(IoU, appearance)` fusion instead. We A/B-tested both on three videos with no
-        ground truth and saw essentially identical ID-stability proxies, so the simpler `min`
-        form is kept here.
+    def _input_for(self, img: np.ndarray | None, feats: np.ndarray | None, mask) -> Any:
+        """Return native backbone features (when configured) or pass-through `img`."""
+        use_native = self.with_reid and self.encoder is not None and getattr(self.args, "model", "auto") == "auto"
+        if use_native and feats is not None and len(feats):
+            return feats[mask]
+        return img
+
+    def _pre_first_associate(self, strack_pool, unconfirmed, img, results_high) -> None:
+        """Apply GMC warp to Kalman state before first-stage association."""
+        if img is None:
+            return
+        try:
+            warp = self.gmc.apply(img, results_high.xyxy if len(results_high) else np.empty((0, 4)))
+        except Exception:
+            warp = np.eye(2, 3)
+        DeepOCSortTrack.multi_gmc(strack_pool, warp)
+        DeepOCSortTrack.multi_gmc(unconfirmed, warp)
+
+    def _fuse_appearance(self, dists, tracks, detections, iou_dists=None):
+        """Min-fuse appearance distance into the cost (BoT-SORT-style; see note below).
+
+        Paper-fidelity: Deep OC-SORT §3.3 specifies an additive, per-pair weighted appearance
+        term. We A/B-tested both on three videos without ground truth and saw essentially
+        identical ID-stability proxies, so the simpler `min` form is kept here.
         """
-        iou_dists = matching.iou_distance(tracks, detections)
-        dists_mask = iou_dists > (1 - self.proximity_thresh)
-
-        if self.args.fuse_score:
-            dists = matching.fuse_score(iou_dists, detections)
-        else:
-            dists = iou_dists.copy()
-
-        # Add OCM velocity direction consistency cost
-        vel_dists = self._velocity_direction_cost(tracks, detections)
-        dists = dists + self.inertia * vel_dists
-
-        # Appearance: min fusion with strict gating (deviates from paper §3.3; see method docstring)
-        if self.with_reid and self.encoder is not None:
-            emb_dists = matching.embedding_distance(tracks, detections) / 2.0
-            emb_dists[emb_dists > (1 - self.appearance_thresh)] = 1.0
-            emb_dists[dists_mask] = 1.0
-            dists = np.minimum(dists, emb_dists)
-
-        return dists
-
-    def update(self, results, img: np.ndarray | None = None, feats: np.ndarray | None = None) -> np.ndarray:
-        """Advance the tracker by one frame using the Deep OC-SORT pipeline.
-
-        Pipeline: Kalman predict + GMC, IoU+OCM+ReID first association, OCR re-association on
-        remaining tracks (also using ReID when enabled), optional ByteTrack low-conf second pass,
-        unconfirmed-track handling, and new-track init.
-        """
-        self.frame_id += 1
-        activated_stracks = []
-        refind_stracks = []
-        lost_stracks = []
-        removed_stracks = []
-
-        scores = results.conf
-        remain_inds = scores >= self.args.track_high_thresh
-        inds_low = scores > self.args.track_low_thresh
-        inds_high = scores < self.args.track_high_thresh
-
-        inds_second = inds_low & inds_high
-        results_second = results[inds_second]
-        results = results[remain_inds]
-
-        # Handle features for ReID
-        use_native_feats = self.with_reid and self.encoder is not None and getattr(self.args, "model", "auto") == "auto"
-        feats_keep = feats_second = img
-        if use_native_feats and feats is not None and len(feats):
-            feats_keep = feats[remain_inds]
-            feats_second = feats[inds_second]
-
-        detections = self.init_track(results, feats_keep if use_native_feats else img)
-
-        # Separate confirmed and unconfirmed tracks
-        unconfirmed = []
-        tracked_stracks = []
-        for track in self.tracked_stracks:
-            if not track.is_activated:
-                unconfirmed.append(track)
-            else:
-                tracked_stracks.append(track)
-
-        # Stage 1: First association with high-score detections
-        strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
-        self.multi_predict(strack_pool)
-
-        # Apply GMC with XYAH-correct transform
-        if img is not None:
-            try:
-                warp = self.gmc.apply(img, results.xyxy if len(results) else np.empty((0, 4)))
-            except Exception:
-                warp = np.eye(2, 3)
-            DeepOCSortTrack.multi_gmc(strack_pool, warp)
-            DeepOCSortTrack.multi_gmc(unconfirmed, warp)
-
-        dists = self.get_dists(strack_pool, detections)
-        matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
-
-        for itracked, idet in matches:
-            track = strack_pool[itracked]
-            det = detections[idet]
-            if track.state == TrackState.Tracked:
-                track.update(det, self.frame_id)
-                activated_stracks.append(track)
-            else:
-                track.apply_oru(det.xyxy, self.frame_id)
-                track.re_activate(det, self.frame_id, new_id=False)
-                refind_stracks.append(track)
-
-        # OCR: Observation-Centric Recovery with appearance features
-        ocr_tracked = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
-        ocr_dets = [detections[i] for i in u_detection]
-
-        if ocr_tracked and ocr_dets:
-            # IoU from last observation position
-            ocr_dists = self._ocr_distance(ocr_tracked, ocr_dets)
-            if self.args.fuse_score:
-                ocr_dists = matching.fuse_score(ocr_dists, ocr_dets)
-
-            # Enhance OCR with appearance (if ReID available); same min-fusion as Stage 1
-            if self.with_reid and self.encoder is not None:
-                ocr_emb_dists = matching.embedding_distance(ocr_tracked, ocr_dets) / 2.0
-                ocr_emb_dists[ocr_emb_dists > (1 - self.appearance_thresh)] = 1.0
-                ocr_dists = np.minimum(ocr_dists, ocr_emb_dists)
-
-            ocr_matches, ocr_u_track, ocr_u_det = matching.linear_assignment(ocr_dists, thresh=self.args.match_thresh)
-
-            for itracked, idet in ocr_matches:
-                track = ocr_tracked[itracked]
-                det = ocr_dets[idet]
-                if track.state == TrackState.Tracked:
-                    track.update(det, self.frame_id)
-                    activated_stracks.append(track)
-                else:
-                    track.apply_oru(det.xyxy, self.frame_id)
-                    track.re_activate(det, self.frame_id, new_id=False)
-                    refind_stracks.append(track)
-
-            ocr_u_track_set = {id(ocr_tracked[i]) for i in ocr_u_track}
-            ocr_u_det_set = {id(ocr_dets[i]) for i in ocr_u_det}
-            u_track = [
-                i for i in u_track
-                if id(strack_pool[i]) in ocr_u_track_set or strack_pool[i].state != TrackState.Tracked
-            ]
-            u_detection = [i for i in u_detection if id(detections[i]) in ocr_u_det_set]
-
-        # Stage 2: Low-confidence second pass (ByteTrack-style)
-        if self.use_byte:
-            detections_second = self.init_track(results_second, feats_second if use_native_feats else img)
-            r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
-            dists = matching.iou_distance(r_tracked_stracks, detections_second)
-            if self.args.fuse_score:
-                dists = matching.fuse_score(dists, detections_second)
-            matches, u_track_second, _ = matching.linear_assignment(dists, thresh=0.5)
-            for itracked, idet in matches:
-                track = r_tracked_stracks[itracked]
-                det = detections_second[idet]
-                if track.state == TrackState.Tracked:
-                    track.update(det, self.frame_id)
-                    activated_stracks.append(track)
-                else:
-                    track.re_activate(det, self.frame_id, new_id=False)
-                    refind_stracks.append(track)
-            for it in u_track_second:
-                track = r_tracked_stracks[it]
-                if track.state != TrackState.Lost:
-                    track.mark_lost()
-                    lost_stracks.append(track)
-        else:
-            for i in u_track:
-                track = strack_pool[i]
-                if track.state == TrackState.Tracked:
-                    track.mark_lost()
-                    lost_stracks.append(track)
-
-        # Stage 3: Unconfirmed tracks
-        detections = [detections[i] for i in u_detection]
-        dists = self.get_dists(unconfirmed, detections)
-        matches, u_unconfirmed, u_detection = matching.linear_assignment(dists, thresh=0.7)
-        for itracked, idet in matches:
-            unconfirmed[itracked].update(detections[idet], self.frame_id)
-            activated_stracks.append(unconfirmed[itracked])
-        for it in u_unconfirmed:
-            track = unconfirmed[it]
-            track.mark_removed()
-            removed_stracks.append(track)
-
-        # Stage 4: Init new tracks
-        for inew in u_detection:
-            track = detections[inew]
-            if track.score < self.args.new_track_thresh:
-                continue
-            track.activate(self.kalman_filter, self.frame_id)
-            activated_stracks.append(track)
-
-        # Stage 5: Update state
-        for track in self.lost_stracks:
-            if self.frame_id - track.end_frame > self.max_frames_lost:
-                track.mark_removed()
-                removed_stracks.append(track)
-
-        merge_track_pools(self, activated_stracks, refind_stracks, lost_stracks, removed_stracks)
-        return np.asarray([x.result for x in self.tracked_stracks if x.is_activated], dtype=np.float32)
+        if not (self.with_reid and self.encoder is not None) or not tracks or not detections:
+            return dists
+        emb_dists = matching.embedding_distance(tracks, detections) / 2.0
+        emb_dists[emb_dists > (1 - self.appearance_thresh)] = 1.0
+        if iou_dists is not None:
+            emb_dists[iou_dists > (1 - self.proximity_thresh)] = 1.0
+        return np.minimum(dists, emb_dists)
 
     def reset(self) -> None:
         """Reset the Deep OC-SORT tracker, also clearing the GMC warp state."""

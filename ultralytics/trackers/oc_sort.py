@@ -206,36 +206,31 @@ class OCSORT(BYTETracker):
         self.use_byte = args.use_byte
 
     def init_track(self, results, img: np.ndarray | None = None) -> list[OCSortTrack]:
-        """Build :class:`OCSortTrack` instances from a `Results`-like object.
-
-        Args:
-            results: Object exposing `xywh` (or `xywhr`), `conf`, and `cls`.
-            img (np.ndarray | None): Current BGR frame. Unused by OC-SORT; accepted for signature
-                parity with other trackers.
-
-        Returns:
-            (list[OCSortTrack]): One :class:`OCSortTrack` per detection, empty if no detections.
-        """
+        """Build :class:`OCSortTrack` instances from a `Results`-like object."""
         if len(results) == 0:
             return []
         bboxes = results.xywhr if hasattr(results, "xywhr") else results.xywh
         bboxes = np.concatenate([bboxes, np.arange(len(bboxes)).reshape(-1, 1)], axis=-1)
         return [OCSortTrack(xywh, s, c, self.delta_t) for (xywh, s, c) in zip(bboxes, results.conf, results.cls)]
 
+    def _input_for(self, img: np.ndarray | None, feats: np.ndarray | None, mask) -> Any:
+        """Return the per-detection input for `init_track`. Default: pass `img` through."""
+        return img
+
+    def _pre_first_associate(self, strack_pool, unconfirmed, img, results_high) -> None:
+        """Hook called after Kalman predict, before first-stage assignment. Default: no-op."""
+        return None
+
+    def _fuse_appearance(self, dists, tracks, detections, iou_dists=None):
+        """Hook combining motion cost with appearance cost. Default: pass-through (no ReID)."""
+        return dists
+
     def get_dists(self, tracks: list[OCSortTrack], detections: list[OCSortTrack]) -> np.ndarray:
-        """Compute the cost matrix from IoU distance plus OCM velocity-direction consistency.
-
-        Args:
-            tracks (list[OCSortTrack]): Currently active tracks.
-            detections (list[OCSortTrack]): Detections to associate.
-
-        Returns:
-            (np.ndarray): `(len(tracks), len(detections))` cost matrix.
-        """
-        dists = matching.iou_distance(tracks, detections)
-        if self.args.fuse_score:
-            dists = matching.fuse_score(dists, detections)
-        return dists + self.inertia * self._velocity_direction_cost(tracks, detections)
+        """Cost matrix = IoU (+score-fuse) + inertia·OCM (+ optional appearance, via hook)."""
+        iou_dists = matching.iou_distance(tracks, detections)
+        dists = matching.fuse_score(iou_dists, detections) if self.args.fuse_score else iou_dists.copy()
+        dists = dists + self.inertia * self._velocity_direction_cost(tracks, detections)
+        return self._fuse_appearance(dists, tracks, detections, iou_dists=iou_dists)
 
     def update(self, results, img: np.ndarray | None = None, feats: np.ndarray | None = None) -> np.ndarray:
         """Advance the tracker by one frame and return the currently active tracks.
@@ -272,7 +267,7 @@ class OCSORT(BYTETracker):
         results_second = results[inds_second]
         results = results[remain_inds]
 
-        detections = self.init_track(results, img)
+        detections = self.init_track(results, self._input_for(img, feats, remain_inds))
 
         # Separate into confirmed and unconfirmed tracks
         unconfirmed = []
@@ -286,6 +281,7 @@ class OCSORT(BYTETracker):
         # Stage 1: First association with high-score detections
         strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
         self.multi_predict(strack_pool)
+        self._pre_first_associate(strack_pool, unconfirmed, img, results)
 
         dists = self.get_dists(strack_pool, detections)
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
@@ -311,6 +307,7 @@ class OCSORT(BYTETracker):
             ocr_dists = self._ocr_distance(ocr_tracked, ocr_dets)
             if self.args.fuse_score:
                 ocr_dists = matching.fuse_score(ocr_dists, ocr_dets)
+            ocr_dists = self._fuse_appearance(ocr_dists, ocr_tracked, ocr_dets)  # no-op in OC-SORT
             ocr_matches, ocr_u_track, ocr_u_det = matching.linear_assignment(ocr_dists, thresh=self.args.match_thresh)
 
             for itracked, idet in ocr_matches:
@@ -332,7 +329,7 @@ class OCSORT(BYTETracker):
 
         # Stage 2: Low-confidence second pass (optional, ByteTrack-style)
         if self.use_byte:
-            detections_second = self.init_track(results_second, img)
+            detections_second = self.init_track(results_second, self._input_for(img, feats, inds_second))
             r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
             dists = matching.iou_distance(r_tracked_stracks, detections_second)
             if self.args.fuse_score:
