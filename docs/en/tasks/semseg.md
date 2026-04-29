@@ -1,6 +1,6 @@
 ---
 comments: true
-description: Learn about semantic segmentation using YOLO26. Assign class labels to every pixel for dense scene understanding with Cityscapes, VOC2012, and ADE20K support.
+description: Learn about semantic segmentation using YOLO26. Assign class labels to every pixel for dense scene understanding with Cityscapes and ADE20K support.
 keywords: semantic segmentation, YOLO26, pixel-wise classification, scene parsing, Cityscapes, ADE20K, VOC, dense prediction, Ultralytics
 model_name: yolo26n-semseg
 ---
@@ -17,7 +17,13 @@ The output of a semantic segmentation model is a single H x W class map where ea
 
     YOLO26 Semantic Segmentation models use the `-semseg` suffix, i.e., `yolo26n-semseg.pt`, and are pretrained on [Cityscapes](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/cityscapes.yaml).
 
+## [Models](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/models/26)
+
+YOLO26 pretrained Semantic Segmentation models are shown here, which are pretrained on the [Cityscapes](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/cityscapes.yaml) dataset.
+
 [Models](https://github.com/ultralytics/ultralytics/tree/main/ultralytics/cfg/models) download automatically from the latest Ultralytics [release](https://github.com/ultralytics/assets/releases) on first use.
+
+{% include "macros/yolo-semseg-perf.md" %}
 
 - **mIoU<sup>val</sup>** values are for single-model single-scale on [Cityscapes](https://www.cityscapes-dataset.com/) dataset. <br>Reproduce by `yolo val semseg data=cityscapes.yaml device=0`
 - **Speed** averaged over cityscapes val images using an [Amazon EC2 P4d](https://aws.amazon.com/ec2/instance-types/p4/) instance. <br>Reproduce by `yolo val semseg data=cityscapes.yaml batch=1 device=0|cpu`
@@ -60,7 +66,7 @@ See full `train` mode details in the [Train](../modes/train.md) page.
 
 ### Dataset format
 
-Semantic segmentation datasets use PNG mask images where each pixel value represents a class ID. Pixels with value 255 are treated as "ignore" and excluded from loss computation. The dataset YAML should specify paths to images and their corresponding mask directories. Supported datasets include [Cityscapes](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/cityscapes.yaml), [VOC2012](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/VOC2012.yaml), and [ADE20K](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/ade20k.yaml).
+Semantic segmentation datasets use PNG mask images where each pixel value represents a class ID. Pixels with value 255 are treated as "ignore" and excluded from loss computation. The dataset YAML should specify paths to images and their corresponding mask directories. See the [Semantic Segmentation Dataset Guide](../datasets/semseg/index.md) for format details. Supported datasets include [Cityscapes](../datasets/semseg/cityscapes.md) and [ADE20K](../datasets/semseg/ade20k.md).
 
 ## Val
 
@@ -195,9 +201,8 @@ Semantic segmentation is best suited for scene understanding tasks like autonomo
 
 Ultralytics YOLO26 supports several semantic segmentation datasets out of the box:
 
-- **[Cityscapes](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/cityscapes.yaml):** Urban street scenes with 19 classes, widely used for autonomous driving research.
-- **[VOC2012](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/VOC2012.yaml):** Pascal VOC 2012 with 20 object classes plus background.
-- **[ADE20K](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/datasets/ade20k.yaml):** A large-scale scene parsing dataset with 150 classes.
+- **[Cityscapes](../datasets/semseg/cityscapes.md):** Urban street scenes with 19 classes, widely used for autonomous driving research.
+- **[ADE20K](../datasets/semseg/ade20k.md):** A large-scale scene parsing dataset with 150 classes.
 
 You can also use any custom dataset that provides PNG mask annotations where pixel values correspond to class IDs.
 
