@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from .basetrack import TrackState
-from .byte_tracker import STrack, BYTETracker
+from .byte_tracker import BYTETracker, STrack
 from .utils import matching
 from .utils.stracks import merge_track_pools
 

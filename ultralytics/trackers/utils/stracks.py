@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from . import matching
 from ..basetrack import TrackState
+from . import matching
 
 
 def merge_track_pools(
