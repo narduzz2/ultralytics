@@ -1,6 +1,6 @@
 ---
-description: TODO ADD DESCRIPTION
-keywords: TODO ADD KEYWORDS
+description: Reference for the Ultralytics DeepX export utility. Learn how to convert ONNX models to DeepX format using the dx_com compiler.
+keywords: onnx2deepx, DeepX export, dx_com, ONNX, model conversion, Ultralytics, INT8 quantization
 ---
 
 # Reference for `ultralytics/utils/export/deepx.py`

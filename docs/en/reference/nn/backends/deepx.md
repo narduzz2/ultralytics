@@ -1,6 +1,6 @@
 ---
-description: TODO ADD DESCRIPTION
-keywords: TODO ADD KEYWORDS
+description: Reference for the Ultralytics DeepXBackend. Learn how to run inference with DeepX NPU compiled models using the dx_engine runtime.
+keywords: DeepXBackend, DeepX, NPU, inference backend, dx_engine, Ultralytics, YOLO, edge AI
 ---
 
 # Reference for `ultralytics/nn/backends/deepx.py`
