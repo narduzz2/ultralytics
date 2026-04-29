@@ -19,7 +19,7 @@ use_byte: False # (bool) Enable ByteTrack-style low-confidence second associatio
 # Deep OC-SORT specifics
 gmc_method: none # (str) Global motion compensation: sparseOptFlow|orb|sift|ecc|none; use 'none' with XYAH state
 with_reid: True # (bool) Enable ReID model use; needs extra model and compute
-model: yolo26n-reid.torchscript # (str) ReID model name/path; "auto" uses detector features if available
+model: auto # (str) ReID model name/path; "auto" uses detector features. Otherwise an exported file (.torchscript / .onnx / .engine / …) loaded via AutoBackend.
 proximity_thresh: 0.5 # (float) Min IoU to consider tracks proximate for ReID; higher is stricter
 appearance_thresh: 0.9 # (float) Min appearance similarity for ReID; raise to avoid identity swaps
 alpha_fixed_emb: 0.95 # (float) Base EMA factor for track embedding updates; higher = slower update

@@ -206,7 +206,7 @@ Each algorithm exposes additional knobs on top of the shared parameters above. S
 By default, ReID is turned off to minimize performance overhead. Enabling it is simple—just set `with_reid: True` in the [tracker configuration](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/trackers/botsort.yaml). You can also customize the `model` used for ReID, allowing you to trade off accuracy and speed depending on your use case:
 
 - **Native features (`model: auto`)**: This leverages features directly from the YOLO detector for ReID, adding minimal overhead. It's ideal when you need some level of ReID without significantly impacting performance. If the detector doesn't support native features, it automatically falls back to using `yolo26n-cls.pt`.
-- **YOLO classification models**: You can explicitly set a classification model (e.g. `yolo26n-cls.pt`) for ReID feature extraction. This provides more discriminative embeddings, but introduces additional latency due to the extra inference step.
+- **Exported ReID model**: Point `model:` at an exported model file (`.torchscript`, `.onnx`, `.engine`, `.openvino`, etc.) that outputs an embedding tensor. The encoder is loaded via `AutoBackend`, so any export format Ultralytics supports works without code changes. This produces more discriminative embeddings than native features at the cost of an extra forward pass per crop. Set the file path as `model:` in your tracker config to use it.
 
 For better performance, especially when using a separate classification model for ReID, you can export it to a faster backend like TensorRT:
 
@@ -308,7 +308,7 @@ ReID is optional in TrackTrack when it's disabled, the `reid_weight` falls back 
 
         # Copy ultralytics/cfg/trackers/tracktrack.yaml and set:
         #   with_reid: True
-        #   model: auto       # or path to a YOLO ReID model for better ReID features
+        #   model: auto       # or path to an exported ReID model (.torchscript / .onnx / .engine)
         model = YOLO("yolo26n.pt")
         results = model.track(
             source="path/to/crowded_scene.mp4",
@@ -433,7 +433,7 @@ In addition to all [OC-SORT arguments](#oc-sort-specific-arguments) and the shar
 | **Parameter**       | **Valid Values or Ranges**                    | **Description**                                                                                                                                       |
 | ------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `with_reid`         | `True`, `False`                               | Enable appearance-based matching. Defaults to `True` for Deep OC-SORT.                                                                                |
-| `model`             | `auto`, `yolo26[nsmlx]-reid.pt`, custom path  | ReID model. `auto` reuses native YOLO features when available; otherwise falls back to a classification model.                                        |
+| `model`             | `auto`, exported ReID model file              | ReID model. `auto` reuses native YOLO features; otherwise pass an exported file (`.torchscript`, `.onnx`, `.engine`, …) loaded via `AutoBackend`.     |
 | `proximity_thresh`  | `0.0-1.0`                                     | Minimum IoU before appearance features are considered in the cost. Prevents far-away embeddings from polluting matches.                               |
 | `appearance_thresh` | `0.0-1.0`                                     | Minimum cosine similarity required for a ReID match. Raise to reduce identity swaps in look-alike scenes.                                             |
 | `alpha_fixed_emb`   | `0.0-1.0`                                     | Base EMA factor for track-embedding updates. Higher values preserve the older embedding longer; the actual rate is modulated by detection confidence. |
