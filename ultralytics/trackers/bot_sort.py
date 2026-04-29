@@ -67,21 +67,24 @@ class BOTrack(STrack):
 
         self.smooth_feat = None
         self.curr_feat = None
+        self.features = deque(maxlen=feat_history)  # init before update_features so first feat is kept
+        self.alpha = 0.9
         if feat is not None:
             self.update_features(feat)
-        self.features = deque(maxlen=feat_history)
-        self.alpha = 0.9
 
     def update_features(self, feat: np.ndarray) -> None:
         """Update the feature vector and apply exponential moving average smoothing."""
-        feat /= np.linalg.norm(feat)
+        norm = np.linalg.norm(feat)
+        if norm < 1e-12:  # skip zero-norm features so smooth_feat isn't poisoned by NaNs
+            return
+        feat = feat / norm  # do NOT mutate caller's array (was `feat /= norm`)
         self.curr_feat = feat
         if self.smooth_feat is None:
             self.smooth_feat = feat
         else:
             self.smooth_feat = self.alpha * self.smooth_feat + (1 - self.alpha) * feat
+            self.smooth_feat /= np.linalg.norm(self.smooth_feat)
         self.features.append(feat)
-        self.smooth_feat /= np.linalg.norm(self.smooth_feat)
 
     def predict(self) -> None:
         """Predict the object's future state using the Kalman filter to update its mean and covariance."""
