@@ -430,18 +430,18 @@ class OCSORT(BYTETracker):
     def _ocr_distance(self, tracks: list[OCSortTrack], detections: list[OCSortTrack]) -> np.ndarray:
         """Compute IoU distance using tracks' last observation positions instead of Kalman predictions.
 
-        Note:
-            `last_observation` is stored in xyxy form. For oriented (OBB) tracks no oriented
-            last-observation is kept, so this method falls back to the Kalman-predicted `xywha`
-            and the OCR pass degenerates to standard IoU on the predicted box. Standard
-            (axis-aligned) tracking gets the full OCR benefit.
-
         Args:
             tracks (list[OCSortTrack]): List of tracks with last_observation attributes.
             detections (list[OCSortTrack]): List of detections.
 
         Returns:
             (np.ndarray): Cost matrix based on IoU with last observations (or xywha for OBB).
+
+        Notes:
+            `last_observation` is stored in xyxy form. For oriented (OBB) tracks no oriented
+            last-observation is kept, so this method falls back to the Kalman-predicted `xywha`
+            and the OCR pass degenerates to standard IoU on the predicted box. Standard
+            (axis-aligned) tracking gets the full OCR benefit.
         """
         if tracks and tracks[0].angle is not None:
             atlbrs = [t.xywha for t in tracks]
