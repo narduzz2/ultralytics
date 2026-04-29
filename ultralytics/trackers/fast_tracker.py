@@ -168,7 +168,7 @@ class FASTTracker(BYTETracker):
         """Build :class:`FastSTrack` instances from a ``Results``-like object.
 
         Args:
-            results: Object exposing ``xywh`` (or ``xywhr``), ``conf``, and ``cls``.
+            results (Any): Object exposing ``xywh`` (or ``xywhr``), ``conf``, and ``cls``.
             img (np.ndarray | None): Current BGR frame. Unused by FastTracker; accepted for signature parity with other
                 trackers.
 
@@ -191,7 +191,7 @@ class FASTTracker(BYTETracker):
         grace window for recently-occluded ones.
 
         Args:
-            results: ``Results``-like object exposing ``xywh`` (or ``xywhr``), ``conf``, and ``cls``, and supporting
+            results (Any): ``Results``-like object exposing ``xywh`` (or ``xywhr``), ``conf``, and ``cls``, and supporting
                 boolean / ndarray indexing.
             img (np.ndarray | None): Current frame. Unused by FastTracker.
             feats (np.ndarray | None): Optional per-detection appearance features. Unused by FastTracker; accepted for

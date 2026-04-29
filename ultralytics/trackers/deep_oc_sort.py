@@ -206,7 +206,7 @@ class DeepOCSORT(OCSORT):
         and the configured external ReID encoder is invoked on detection crops.
 
         Args:
-            results: Object exposing `xywh` (or `xywhr`), `conf`, and `cls`.
+            results (Any): Object exposing `xywh` (or `xywhr`), `conf`, and `cls`.
             img (np.ndarray | None): Either the BGR frame or pre-extracted feature tensors, depending on the ReID
                 configuration.
 

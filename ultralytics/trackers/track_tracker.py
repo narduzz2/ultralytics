@@ -269,10 +269,10 @@ class TTSTrack(BaseTrack):
         """Create a new track from a detection bounding box.
 
         Args:
-            xywh: (x, y, w, h, idx) or (x, y, w, h, angle, idx), center-based with detection index.
-            score: Detection confidence.
-            cls: Class label.
-            feat: Optional ReID feature vector.
+            xywh (list[float]): (x, y, w, h, idx) or (x, y, w, h, angle, idx), center-based with detection index.
+            score (float): Detection confidence.
+            cls (Any): Class label.
+            feat (np.ndarray | None): Optional ReID feature vector.
         """
         super().__init__()
         assert len(xywh) in {5, 6}, f"expected 5 or 6 values but got {len(xywh)}"

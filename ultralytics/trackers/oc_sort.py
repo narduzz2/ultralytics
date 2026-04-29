@@ -243,7 +243,7 @@ class OCSORT(BYTETracker):
         Kalman state repaired by :meth:`OCSortTrack.apply_oru` before re-activation.
 
         Args:
-            results: `Results`-like object exposing `xywh` (or `xywhr`), `conf`, and `cls`, and supporting boolean /
+            results (Any): `Results`-like object exposing `xywh` (or `xywhr`), `conf`, and `cls`, and supporting boolean /
                 ndarray indexing.
             img (np.ndarray | None): Current frame. Unused by OC-SORT.
             feats (np.ndarray | None): Optional per-detection appearance features. Unused by OC-SORT; accepted for
