@@ -391,4 +391,5 @@ def test_export_deepx():
     # For faster testing, use a smaller calibration dataset
     file = YOLO(MODEL).export(format="deepx", imgsz=32, data="coco8.yaml")
     assert Path(file).exists(), f"DeepX export failed, directory not found: {file}"
+    assert any(Path(file).rglob("*.dxnn")), f"DeepX export failed, no .dxnn file found in {file}"
     shutil.rmtree(file, ignore_errors=True)  # cleanup

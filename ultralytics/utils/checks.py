@@ -370,13 +370,12 @@ def install_deb(url: str, tmpdir: str | Path, label: str) -> None:
         tmpdir (str | Path): Temporary directory to store the downloaded file.
         label (str): Human-readable label for log messages (e.g. ``"NPU driver"``).
     """
-    sudo = "sudo " if is_sudo_available() else ""
     deb_path = Path(tmpdir) / Path(url).name
     try:
         LOGGER.info(f"Downloading {label} from {url}...")
         subprocess.run(["wget", "-O", str(deb_path), url], check=True, timeout=120)
         LOGGER.info(f"Installing {label}...")
-        subprocess.run(f"{sudo}dpkg -i {deb_path}".split(), check=True)
+        subprocess.run((["sudo"] if is_sudo_available() else []) + ["dpkg", "-i", str(deb_path)], check=True)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
         LOGGER.warning(f"{label} installation failed (non-fatal): {e}")
 
