@@ -71,7 +71,10 @@ class DeepOCSortTrack(OCSortTrack):
             feat (np.ndarray): New (un-normalized) appearance feature vector.
             score (float | None): Detection confidence used to modulate the EMA factor.
         """
-        feat = feat / np.linalg.norm(feat)
+        norm = np.linalg.norm(feat)
+        if norm < 1e-12:  # skip zero-norm features so smooth_feat isn't poisoned by NaNs
+            return
+        feat = feat / norm
         self.curr_feat = feat
         if self.smooth_feat is None:
             self.smooth_feat = feat
@@ -218,7 +221,7 @@ class DeepOCSORT(OCSORT):
         bboxes = results.xywhr if hasattr(results, "xywhr") else results.xywh
         bboxes = np.concatenate([bboxes, np.arange(len(bboxes)).reshape(-1, 1)], axis=-1)
 
-        if self.with_reid and self.encoder is not None:
+        if self.with_reid and self.encoder is not None and img is not None:
             features = self.encoder(img, bboxes)
             return [
                 DeepOCSortTrack(
@@ -237,13 +240,18 @@ class DeepOCSORT(OCSORT):
             for (xywh, s, c) in zip(bboxes, results.conf, results.cls)
         ]
 
-    # ---- Hooks invoked by OCSORT.update --------------------------------------------------
-
     def _input_for(self, img: np.ndarray | None, feats: np.ndarray | None, mask) -> Any:
-        """Return native backbone features (when configured) or pass-through `img`."""
+        """Return what `init_track` should receive.
+
+        For `model="auto"` (native-features mode) the encoder iterates a per-detection feature
+        tensor, so we must hand it `feats[mask]`. If the upstream pipeline didn't populate
+        `feats` (e.g. user-supplied detections), return None so :meth:`init_track` falls back
+        to the no-encoding path instead of feeding a BGR frame into the auto encoder. For
+        external ReID models, `init_track` always wants the BGR frame.
+        """
         use_native = self.with_reid and self.encoder is not None and getattr(self.args, "model", "auto") == "auto"
-        if use_native and feats is not None and len(feats):
-            return feats[mask]
+        if use_native:
+            return feats[mask] if (feats is not None and len(feats)) else None
         return img
 
     def _pre_first_associate(self, strack_pool, unconfirmed, img, results_high) -> None:
