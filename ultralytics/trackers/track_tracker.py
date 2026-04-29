@@ -575,8 +575,7 @@ class TRACKTRACK:
             ]
         else:
             detections = [
-                _new_track(box, score, cls)
-                for box, score, cls in zip(boxes_remain, scores_remain, cls_remain)
+                _new_track(box, score, cls) for box, score, cls in zip(boxes_remain, scores_remain, cls_remain)
             ]
         detections_second = [
             _new_track(box, score, cls)
@@ -590,8 +589,7 @@ class TRACKTRACK:
             if mask.any():
                 del_boxes = np.concatenate([del_xywh[mask], -np.ones((mask.sum(), 1))], axis=-1)
                 detections_del = [
-                    _new_track(box, score, cls)
-                    for box, score, cls in zip(del_boxes, del_conf[mask], del_cls[mask])
+                    _new_track(box, score, cls) for box, score, cls in zip(del_boxes, del_conf[mask], del_cls[mask])
                 ]
 
         # Split existing tracks into confirmed vs unconfirmed
