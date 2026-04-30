@@ -6,6 +6,7 @@ from copy import copy
 
 import cv2
 import numpy as np
+import torch
 
 from ultralytics.data import build_dataloader
 from ultralytics.data.dataset import PolygonSemsegDataset, SemsegDataset, add_polygon_background
