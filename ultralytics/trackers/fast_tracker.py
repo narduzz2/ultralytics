@@ -45,7 +45,7 @@ class FastSTrack(STrack):
 
         Args:
             xywh (list[float]): Bounding box in ``(x, y, w, h, idx)`` or ``(x, y, w, h, angle, idx)`` format.
-            score (float): Detection confidence in [0, 1].
+            score (float): Detection confidence in `[0, 1]`.
             cls (Any): Class label for the detection.
             history_len (int): Maximum number of past Kalman mean vectors kept for occlusion rollback.
         """
@@ -118,7 +118,7 @@ class FASTTracker(BYTETracker):
             onset.
         reset_pos_offset_occ (int): Number of frames to look back when restoring Kalman position at occlusion onset.
         enlarge_bbox_occ (float): One-shot multiplier applied to the bbox height when occlusion is first detected.
-        dampen_motion_occ (float): Multiplier in [0, 1] applied to Kalman velocity during occlusion.
+        dampen_motion_occ (float): Multiplier in `[0, 1]` applied to Kalman velocity during occlusion.
         active_occ_to_lost_thresh (int): Maximum consecutive occluded frames before a track is marked lost anyway.
         init_iou_suppress (float): IoU threshold above which a new detection is prevented from spawning a fresh track.
             Set to 1.0 to disable suppression.

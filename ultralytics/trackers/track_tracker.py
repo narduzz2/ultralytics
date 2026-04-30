@@ -444,7 +444,7 @@ class TTSTrack(BaseTrack):
 
     @property
     def result(self) -> list[float]:
-        """Packed tracking result: [*coords, track_id, score, cls, idx]."""
+        """Packed tracking result: `[*coords, track_id, score, cls, idx]`."""
         coords = self.xyxy if self.angle is None else self.xywha
         return [*coords.tolist(), self.track_id, self.score, self.cls, self.idx]
 

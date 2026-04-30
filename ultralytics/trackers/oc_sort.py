@@ -30,7 +30,7 @@ class OCSortTrack(STrack):
 
         Args:
             xywh (list[float]): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format.
-            score (float): Detection confidence in [0, 1].
+            score (float): Detection confidence in `[0, 1]`.
             cls (Any): Class label for the detection.
             delta_t (int): Temporal window (in frames) used for velocity direction computation.
         """

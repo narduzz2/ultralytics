@@ -144,15 +144,7 @@ def iou_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
     """
     if boxes_a.size == 0 or boxes_b.size == 0:
         return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
-    a = boxes_a[:, None, :]
-    b = boxes_b[None, :, :]
-    inter_w = np.clip(np.minimum(a[..., 2], b[..., 2]) - np.maximum(a[..., 0], b[..., 0]), 0, None)
-    inter_h = np.clip(np.minimum(a[..., 3], b[..., 3]) - np.maximum(a[..., 1], b[..., 1]), 0, None)
-    inter = inter_w * inter_h
-    area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
-    area_b = (boxes_b[:, 2] - boxes_b[:, 0]) * (boxes_b[:, 3] - boxes_b[:, 1])
-    union = area_a[:, None] + area_b[None, :] - inter + 1e-9
-    return (inter / union).astype(np.float32)
+    return bbox_ioa(boxes_a, boxes_b, iou=True).astype(np.float32)
 
 
 def coverage_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:

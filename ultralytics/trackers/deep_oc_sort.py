@@ -43,7 +43,7 @@ class DeepOCSortTrack(OCSortTrack):
 
         Args:
             xywh (list[float]): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format.
-            score (float): Detection confidence in [0, 1].
+            score (float): Detection confidence in `[0, 1]`.
             cls (Any): Class label for the detection.
             delta_t (int): Temporal window for OCM velocity direction computation.
             feat (np.ndarray | None): Optional appearance feature vector for this detection.
