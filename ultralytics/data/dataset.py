@@ -29,16 +29,13 @@ from .augment import (
     Format,
     LetterBox,
     RandomFlip,
-    RandomHSV,
     RandomLoadText,
     classify_augmentations,
     classify_transforms,
     v8_transforms,
-    SemsegRandomScaleCrop,
     SemsegRandomScale,
     SemsegRandomCrop,
     PhotoMetricDistortion,
-    Mosaic
 )
 from .base import BaseDataset
 from .converter import merge_multi_segment
@@ -725,9 +722,7 @@ class SemsegDataset(BaseDataset):
         if mapping is None:
             return {}
         if not isinstance(mapping, dict):
-            raise TypeError(
-                f"Expected 'label_mapping' to be a dict in dataset YAML, but got {type(mapping).__name__}."
-            )
+            raise TypeError(f"Expected 'label_mapping' to be a dict in dataset YAML, but got {type(mapping).__name__}.")
 
         normalized = {}
         for src, dst in mapping.items():
@@ -1098,16 +1093,28 @@ class SemsegDataset(BaseDataset):
         nc = self.data.get("nc", len(self.data.get("names", [])))
         if self.augment:
             transforms.append(SemsegRandomScale(scale_min=0.5, scale_max=2.0))
-            transforms.append(SemsegRandomCrop(crop_size=int(self.imgsz), ignore_label=self.ignore_label if nc > 1 else 0))
+            transforms.append(
+                SemsegRandomCrop(crop_size=int(self.imgsz), ignore_label=self.ignore_label if nc > 1 else 0)
+            )
             transforms.append(RandomFlip(p=0.5, direction="horizontal"))
-            transforms.append(PhotoMetricDistortion(
-                brightness_delta=12,
-                contrast_range=(0.85, 1.15),
-                saturation_range=(0.85, 1.15),
-                hue_delta=0,
-                ))
+            transforms.append(
+                PhotoMetricDistortion(
+                    brightness_delta=12,
+                    contrast_range=(0.85, 1.15),
+                    saturation_range=(0.85, 1.15),
+                    hue_delta=0,
+                )
+            )
         else:
-            transforms.append(LetterBox(auto=False, scaleup=False, center=False, stride=self.stride, ignore_label=self.ignore_label if nc > 1 else 0))
+            transforms.append(
+                LetterBox(
+                    auto=False,
+                    scaleup=False,
+                    center=False,
+                    stride=self.stride,
+                    ignore_label=self.ignore_label if nc > 1 else 0,
+                )
+            )
         transforms.append(SemanticFormat())
         return Compose(transforms)
 
