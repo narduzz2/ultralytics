@@ -26,7 +26,7 @@ from torch import nn, optim
 
 from ultralytics import __version__
 from ultralytics.cfg import get_cfg, get_save_dir
-from ultralytics.data.utils import check_cls_dataset, check_det_dataset
+from ultralytics.data.utils import check_cls_dataset, check_det_dataset, convert_ndjson_to_yolo_if_needed
 from ultralytics.nn.tasks import load_checkpoint
 from ultralytics.optim import MuSGD
 from ultralytics.utils import (
@@ -335,13 +335,13 @@ class BaseTrainer:
         self.scaler = (
             torch.amp.GradScaler("cuda", enabled=self.amp) if TORCH_2_4 else torch.cuda.amp.GradScaler(enabled=self.amp)
         )
-        if self.world_size > 1:
-            self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[RANK], find_unused_parameters=True)
-
         # Check imgsz
         gs = max(int(self.model.stride.max() if hasattr(self.model, "stride") else 32), 32)  # grid size (max stride)
         self.args.imgsz = check_imgsz(self.args.imgsz, stride=gs, floor=gs, max_dim=1)
         self.stride = gs  # for multiscale training
+
+        if self.world_size > 1:
+            self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[RANK], find_unused_parameters=True)
 
         # Batch size
         if self.batch_size < 1 and RANK == -1:  # single-GPU only, estimate best batch size
@@ -456,6 +456,8 @@ class BaseTrainer:
                         f"CUDA out of memory with batch={old_batch}. "
                         f"Reducing to batch={self.batch_size} and retrying ({self._oom_retries}/3)."
                     )
+                    batch = loss = preds = None
+                    self.loss = self.loss_items = self.tloss = None
                     self._clear_memory()
                     self._build_train_pipeline()  # rebuild dataloaders, optimizer, scheduler
                     self.scheduler.last_epoch = self.start_epoch - 1
@@ -631,10 +633,7 @@ class BaseTrainer:
         import io
 
         ema = deepcopy(unwrap_model(self.ema.ema)).half()
-        if (
-            not all(torch.isfinite(v).all() for v in ema.state_dict().values() if isinstance(v, torch.Tensor))
-            and self.epoch > self.start_epoch  # at least save checkpoint for the first epoch
-        ):
+        if not all(torch.isfinite(v).all() for v in ema.state_dict().values() if isinstance(v, torch.Tensor)):
             LOGGER.warning(f"Skipping checkpoint save at epoch {self.epoch}: EMA contains NaN/Inf")
             return False
 
@@ -683,15 +682,7 @@ class BaseTrainer:
             (dict): A dictionary containing the training/validation/test dataset and category names.
         """
         try:
-            # Convert ul:// platform URIs and NDJSON files to local dataset format first
-            data_str = str(self.args.data)
-            if data_str.endswith(".ndjson") or (data_str.startswith("ul://") and "/datasets/" in data_str):
-                import asyncio
-
-                from ultralytics.data.converter import convert_ndjson_to_yolo
-                from ultralytics.utils.checks import check_file
-
-                self.args.data = str(asyncio.run(convert_ndjson_to_yolo(check_file(self.args.data))))
+            self.args.data = convert_ndjson_to_yolo_if_needed(self.args.data)
 
             # Task-specific dataset checking
             if self.args.task == "classify":
@@ -727,8 +718,10 @@ class BaseTrainer:
         if str(self.model).endswith(".pt"):
             weights, ckpt = load_checkpoint(self.model)
             cfg = weights.yaml
-        elif isinstance(self.args.pretrained, (str, Path)):
+        if isinstance(self.args.pretrained, (str, Path)):
             weights, _ = load_checkpoint(self.args.pretrained)
+        elif self.args.pretrained is False and not self.resume:
+            weights = None
         self.model = self.get_model(cfg=cfg, weights=weights, verbose=RANK in {-1, 0})  # calls Model(cfg, weights)
         return ckpt
 
@@ -961,7 +954,7 @@ class BaseTrainer:
             )
             self.epochs += ckpt["epoch"]  # finetune additional epochs
         self._load_checkpoint_state(ckpt)
-        if unwrap_model(self.model).end2end:
+        if getattr(unwrap_model(self.model), "end2end", False):
             # initialize loss and resume o2o and o2m args
             unwrap_model(self.model).criterion = unwrap_model(self.model).init_criterion()
             unwrap_model(self.model).criterion.updates = start_epoch - 1
