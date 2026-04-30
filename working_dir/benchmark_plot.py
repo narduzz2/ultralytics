@@ -354,7 +354,7 @@ BENCHMARKS = {
             ],
             "DEIMv2 (Ultralytics, obj365)": [
                 ("xl4", 13.9, {"ap": 59.5, "ap50": 77.1, "ap75": 65.1, "ap_small": 42.7, "ap_medium": 64.8, "ap_large": 76.8}),
-                ("xl6", 14.6, {"ap": 59.6, "ap50": 77.4, "ap75": 65.1, "ap_small": 43.1, "ap_medium": 64.7, "ap_large": 76.8}),
+                ("xl6", 14.3, {"ap": 59.8, "ap50": 77.7, "ap75": 65.3, "ap_small": 43.3, "ap_medium": 64.8, "ap_large": 77.4}),
             ],
             # "DINOv3-RTDETR": [
             #     ("s", 4.3, {"ap": 50.3, "ap50": 69.0, "ap75": 54.4, "ap_small": 27.8, "ap_medium": 55.8, "ap_large": 72.5}),
@@ -438,7 +438,7 @@ BENCHMARKS = {
             ],
             "DEIMv2 (Ultralytics, obj365)": [
                 ("xl4", 13.9, {"ap": 59.5, "ap50": 77.1, "ap75": 65.1, "ap_small": 42.7, "ap_medium": 64.8, "ap_large": 76.8}),
-                ("xl6", 14.6, {"ap": 59.6, "ap50": 77.4, "ap75": 65.1, "ap_small": 43.1, "ap_medium": 64.7, "ap_large": 76.8}),
+                ("xl6", 14.3, {"ap": 59.8, "ap50": 77.7, "ap75": 65.3, "ap_small": 43.3, "ap_medium": 64.8, "ap_large": 77.4}),
             ],
             "DEIMv2 (Ultralytics)": [
                 # ("l", 10.7, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
