@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 from copy import copy
-from pathlib import Path
 
 import cv2
 import numpy as np
-import torch
 
 from ultralytics.data import build_dataloader
 from ultralytics.data.dataset import PolygonSemsegDataset, SemsegDataset, add_polygon_background
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
-from ultralytics.nn.tasks import SemanticSegmentationModel, load_checkpoint
-from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
+from ultralytics.utils import DEFAULT_CFG, RANK
 from ultralytics.utils.plotting import colors
 from ultralytics.utils.torch_utils import torch_distributed_zero_first
 
@@ -114,22 +111,12 @@ class SemanticSegmentationTrainer(BaseTrainer):
         Returns:
             (SemanticSegmentationModel): Semantic segmentation model.
         """
-        model = SemanticSegmentationModel(cfg, nc=self.data["nc"], ch=self.data.get("channels", 3), verbose=verbose and RANK == -1)
+        model = SemanticSegmentationModel(
+            cfg, nc=self.data["nc"], ch=self.data.get("channels", 3), verbose=verbose and RANK == -1
+        )
         if weights:
             model.load(weights)
-        elif self.args.pretrained is True:
-            # Auto-resolve pretrained detection checkpoint for backbone init
-            # e.g., yolo26n-semseg (scale=n) -> "yolo26n.pt"
-            import re
 
-            model_str = self.args.model if isinstance(self.args.model, str) else str(cfg)
-            scale = model.yaml.get("scale", "")
-            # Strip scale and task suffix: "yolo26n-semseg.yaml" -> "yolo26" then add scale back
-            base = re.sub(r"[nslmx]?-semseg", "", Path(model_str).stem)
-            det_name = f"{base}{scale}.pt"
-            LOGGER.info(f"Loading pretrained backbone from {det_name}")
-            det_weights, _ = load_checkpoint(det_name)
-            model.load(det_weights)
         return model
 
     def get_validator(self):
@@ -154,8 +141,6 @@ class SemanticSegmentationTrainer(BaseTrainer):
         Returns:
             (dict): Preprocessed batch.
         """
-        import torch
-
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
