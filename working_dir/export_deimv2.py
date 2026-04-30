@@ -28,7 +28,7 @@ def parse_args():
         "--name",
         type=str,
         default=None,
-        help="Optional experiment stem. Defaults to '<weights>_op{opset}_{sim|nosim}_{rope|norope}[...tags]'.",
+        help="Optional experiment stem. Output names also include imgsz, precision, and export tags.",
     )
     p.add_argument(
         "--outdir",
@@ -280,7 +280,7 @@ def build_output_paths(args):
     outdir = Path(args.outdir) if args.outdir else weights_path.parent
     rope_tag = "rope" if args.ropefix else "norope"
     sim_tag = "sim" if args.simplify else "nosim"
-    extra_tags = []
+    extra_tags = [f"imgsz{args.imgsz}"]
     if args.export_eval_idx is not None:
         extra_tags.append(f"eidx{args.export_eval_idx}")
     if args.export_num_queries is not None:
