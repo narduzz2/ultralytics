@@ -456,7 +456,7 @@ class DETRLoss(nn.Module):
 
 
 class RTDETRDetectionLoss(DETRLoss):
-    """Real-Time Detection Transformer (RT-DETR) Detection Loss class that extends the DETRLoss.
+    """Real-Time DEtection TRansformer (RT-DETR) Detection Loss class that extends the DETRLoss.
 
     This class computes the detection loss for the RT-DETR model, which includes the standard detection loss as well as
     an additional denoising training loss when provided with denoising metadata.
