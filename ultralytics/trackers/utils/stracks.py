@@ -99,16 +99,17 @@ def sub_stracks(atracks: list, btracks: list) -> list:
     return [t for t in atracks if t.track_id not in btrack_ids]
 
 
-def remove_duplicate_stracks(atracks: list, btracks: list) -> tuple[list, list]:
+def remove_duplicate_stracks(atracks: list, btracks: list, dup_thresh: float = 0.15) -> tuple[list, list]:
     """Remove duplicate tracks across two lists based on Intersection over Union (IoU) distance.
 
-    Track pairs with IoU distance < 0.15 (IoU > 0.85) are treated as duplicates of the same
+    Track pairs with IoU distance < `dup_thresh` (IoU > `1 - dup_thresh`) are treated as duplicates of the same
     object. The shorter-lived track (smaller `frame_id - start_frame`) is dropped; ties drop
     from `atracks`.
 
     Args:
         atracks (list[STrack]): First list of tracks; entries must expose `xyxy`, `frame_id`, and `start_frame`.
         btracks (list[STrack]): Second list of tracks with the same attribute requirements.
+        dup_thresh (float): IoU-distance ceiling for treating two tracks as duplicates. Default 0.15 (IoU > 0.85).
 
     Returns:
         resa (list[STrack]): `atracks` with duplicate tracks removed.
@@ -119,7 +120,7 @@ def remove_duplicate_stracks(atracks: list, btracks: list) -> tuple[list, list]:
         >>> tracked, lost = remove_duplicate_stracks(tracked_stracks, lost_stracks)
     """
     pdist = matching.iou_distance(atracks, btracks)
-    pairs = np.where(pdist < 0.15)
+    pairs = np.where(pdist < dup_thresh)
     dupa, dupb = [], []
     for p, q in zip(*pairs):
         timep = atracks[p].frame_id - atracks[p].start_frame
