@@ -168,7 +168,8 @@ def coverage_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
     inter_h = np.clip(np.minimum(a[..., 3], b[..., 3]) - np.maximum(a[..., 1], b[..., 1]), 0, None)
     inter = inter_w * inter_h
     area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
-    return (inter / (area_a[:, None] + 1e-9)).astype(np.float32)
+    # Degenerate (zero-area) boxes return 0 coverage instead of inflating to 1e9 via 1/eps.
+    return np.where(area_a[:, None] > 0, inter / (area_a[:, None] + 1e-9), 0.0).astype(np.float32)
 
 
 def fuse_score(cost_matrix: np.ndarray, detections: list) -> np.ndarray:
