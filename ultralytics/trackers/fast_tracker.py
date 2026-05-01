@@ -301,6 +301,10 @@ class FASTTracker(BYTETracker):
         # carry stale `idx` values from a previous frame's detection list, which would index into
         # today's results out-of-bounds.
         return np.asarray(
+            # `frame_id == self.frame_id` is required: FastTracker keeps occluded-but-alive
+            # tracks in `tracked_stracks` for the grace window, but their stored `idx` is from
+            # the last frame they matched. Returning those with stale idx would feed wrong
+            # indices into `track.py: predictor.results[i] = result[idx]`.
             [x.result for x in self.tracked_stracks if x.is_activated and x.frame_id == self.frame_id],
             dtype=np.float32,
         )
@@ -363,12 +367,15 @@ class FASTTracker(BYTETracker):
                 track.was_recently_occluded = True
 
                 hist = track.mean_history
-                if track.mean is not None:
+                if track.mean is not None and hist:
+                    # Patch velocity from a deeper snapshot to forget motion corrupted by
+                    # occlusion onset; patch position from a more recent snapshot to keep
+                    # the search anchored. Pair the covariance with the position snapshot
+                    # (whichever rolls back furthest among the available offsets) so the
+                    # Kalman filter stays internally consistent.
                     if len(hist) >= self.reset_velocity_offset_occ:
-                        prev_mean, prev_cov = hist[-self.reset_velocity_offset_occ]
+                        prev_mean, _ = hist[-self.reset_velocity_offset_occ]
                         track.mean[4:8] = prev_mean[4:8]
-                        # Roll covariance back along with velocity so the KF stays consistent.
-                        track.covariance = prev_cov.copy()
                     if len(hist) >= self.reset_pos_offset_occ:
                         prev_mean, prev_cov = hist[-self.reset_pos_offset_occ]
                         track.mean[0:4] = prev_mean[0:4]
