@@ -154,22 +154,18 @@ def coverage_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
     box's side but potentially low IoU.
 
     Args:
-        boxes_a (np.ndarray): `(N, 4)` xyxy boxes — candidates for being covered.
-        boxes_b (np.ndarray): `(M, 4)` xyxy boxes — candidate occluders.
+        boxes_a (np.ndarray): `(N, 4)` xyxy boxes; candidates for being covered.
+        boxes_b (np.ndarray): `(M, 4)` xyxy boxes; candidate occluders.
 
     Returns:
         (np.ndarray): Float32 `(N, M)` matrix where entry `[i, j]` equals `intersection(a_i, b_j) / area(a_i)`.
     """
     if boxes_a.size == 0 or boxes_b.size == 0:
         return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
-    a = boxes_a[:, None, :]
-    b = boxes_b[None, :, :]
-    inter_w = np.clip(np.minimum(a[..., 2], b[..., 2]) - np.maximum(a[..., 0], b[..., 0]), 0, None)
-    inter_h = np.clip(np.minimum(a[..., 3], b[..., 3]) - np.maximum(a[..., 1], b[..., 1]), 0, None)
-    inter = inter_w * inter_h
-    area_a = (boxes_a[:, 2] - boxes_a[:, 0]) * (boxes_a[:, 3] - boxes_a[:, 1])
-    # Degenerate (zero-area) boxes return 0 coverage instead of inflating to 1e9 via 1/eps.
-    return np.where(area_a[:, None] > 0, inter / (area_a[:, None] + 1e-9), 0.0).astype(np.float32)
+    # `bbox_ioa(box1, box2, iou=False)` returns `inter / area(box2)`. We want
+    # `inter / area(boxes_a)`, so pass `(boxes_b, boxes_a)` to put `area_a` in the
+    # denominator, then transpose to put rows over `boxes_a` (N, M).
+    return bbox_ioa(boxes_b, boxes_a, iou=False).T.astype(np.float32)
 
 
 def fuse_score(cost_matrix: np.ndarray, detections: list) -> np.ndarray:
