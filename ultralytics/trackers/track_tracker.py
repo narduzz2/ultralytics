@@ -193,7 +193,7 @@ def compute_dets_del(predictor) -> list | None:
     preds were captured. Consumes `_raw_preds` (clears it on the predictor).
     """
     raw = getattr(predictor, "_raw_preds", None)
-    if raw is None:
+    if raw is None or not isinstance(raw, torch.Tensor):
         return None
     from torchvision.ops import box_iou
 
@@ -481,7 +481,6 @@ class TRACKTRACK:
         self.args = args
         self.max_time_lost = int(frame_rate / 30.0 * args.track_buffer)
         self.kalman_filter = KalmanFilterXYWH()
-        TTSTrack.reset_id()
 
         # Association + cost-matrix weights
         g = lambda k, d: getattr(args, k, d)  # noqa: E731 - local getter for brevity
@@ -663,6 +662,9 @@ class TRACKTRACK:
 
         merge_track_pools(self, activated, refind, lost, removed)
         return np.asarray(
+            # `frame_id == self.frame_id` filters out tracks that survived this frame in the
+            # tracked pool without being matched (their stored `idx` is stale from a previous
+            # frame, and `track.py: result[idx]` would index incorrectly).
             [track.result for track in self.tracked_stracks if track.is_activated and track.frame_id == self.frame_id],
             dtype=np.float32,
         )
