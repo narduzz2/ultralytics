@@ -108,14 +108,58 @@ The `.dxnn` file is the compiled model binary that the `dx_engine` runtime loads
 
 Once you've successfully exported your Ultralytics YOLO model to DeepX format, the next step is deploying these models on DeepX NPU hardware.
 
-!!! tip "Installation"
+### Runtime Installation
+
+Inference requires the DeepX NPU driver, the `libdxrt` runtime, and the `dx_engine` Python package. Choose the install path that matches your platform.
+
+!!! example "ARM64 Debian Trixie (Sixfab APT)"
 
     === "CLI"
 
         ```bash
-        # Install the required package for YOLO
-        pip install ultralytics
+        # Add the Sixfab APT repository
+        wget -qO - https://sixfab.github.io/sixfab_dx/public.gpg | sudo gpg --dearmor -o /usr/share/keyrings/sixfab-dx.gpg
+        echo "deb [signed-by=/usr/share/keyrings/sixfab-dx.gpg] https://sixfab.github.io/sixfab_dx trixie main" | sudo tee /etc/apt/sources.list.d/sixfab-dx.list
+
+        # Install the DeepX runtime
+        sudo apt update
+        sudo apt install -y sixfab-dx
+
+        # Install the bundled dx_engine Python wheel
+        pip install /opt/sixfab-dx/wheels/dx_engine-*.whl
         ```
+
+!!! example "x86-64 Linux (DEEPX .deb packages)"
+
+    === "CLI"
+
+        ```bash
+        # Build dependencies for the DKMS NPU driver module
+        sudo apt update
+        sudo apt install -y dkms libncurses-dev
+
+        # Install the NPU driver and libdxrt runtime
+        wget https://github.com/DEEPX-AI/dx_rt_npu_linux_driver/raw/main/release/2.4.0/dxrt-driver-dkms_2.4.0-2_all.deb
+        sudo dpkg -i dxrt-driver-dkms_2.4.0-2_all.deb
+        wget https://github.com/DEEPX-AI/dx_rt/raw/main/release/3.3.0/libdxrt_3.3.0_all.deb
+        sudo dpkg -i libdxrt_3.3.0_all.deb
+
+        # Install the bundled dx_engine Python wheel
+        pip install /usr/share/libdxrt/src/python_package/dx_engine-*.whl
+        ```
+
+Verify the runtime is installed correctly with `dxrt-cli --version`. You should see output similar to:
+
+```text
+DXRT v3.3.0
+Minimum Driver Versions
+  Device Driver: v2.4.0
+  PCIe Driver: v2.2.0
+  Firmware: v2.5.2
+Minimum Compiler Versions
+  Compiler: v1.18.1
+  .dxnn File Format: v6
+```
 
 ### Usage
 
@@ -144,10 +188,6 @@ Once you've successfully exported your Ultralytics YOLO model to DeepX format, t
         # Run inference with the exported DeepX model
         yolo predict model='yolo26n_deepx_model' source='https://ultralytics.com/images/bus.jpg'
         ```
-
-!!! note
-
-    - `dx_engine` runtime package is required for inference and will be installed automatically on first use.
 
 ### Visualizing with dxtron
 
@@ -237,6 +277,6 @@ Yes. Any model trained using [Ultralytics Train Mode](../modes/train.md) and exp
 
 The DeepX export pipeline defaults to 100 calibration images using the EMA calibration method. This is generally sufficient for good quantization accuracy. You can adjust the calibration dataset using the `data` and `fraction` arguments, but using more than a few hundred images rarely improves results significantly.
 
-### How do I install the DeepX runtime on non-Trixie platforms?
+### How do I install the DeepX runtime for inference?
 
-On platforms other than Debian Trixie (ARM64), the runtime is not auto-installed via APT. You need to manually install the NPU driver (`dxrt-driver-dkms`), runtime library (`libdxrt`), and the `dx_engine` Python wheel. The backend will attempt to find and install the wheel from `/usr/share/libdxrt/src/python_package/` automatically, but if that fails, see the [Manual Runtime Installation](#installation_1) section above for step-by-step instructions. If you encounter PEP 668 errors on Python 3.12+, use a virtual environment.
+The DeepX runtime is not bundled with `ultralytics` and must be installed separately before running inference. On ARM64 Debian Trixie, install via the Sixfab APT repository (`sixfab-dx`). On x86-64 Linux, install the NPU driver (`dxrt-driver-dkms`) and runtime (`libdxrt`) from the DEEPX-AI GitHub releases, then install the bundled `dx_engine` Python wheel. See the [Runtime Installation](#runtime-installation) section above for step-by-step commands.
