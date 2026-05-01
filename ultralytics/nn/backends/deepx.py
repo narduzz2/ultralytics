@@ -16,7 +16,7 @@ class DeepXBackend(BaseBackend):
     """DeepX NPU inference backend for DeepX hardware accelerators.
 
     Loads compiled DeepX models (.dxnn files) and runs inference using the DeepX dx_engine runtime.
-    """ 
+    """
 
     def load_model(self, weight: str | Path) -> None:
         """Load a DeepX model from a directory containing a .dxnn file.
