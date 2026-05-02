@@ -13,6 +13,7 @@ from ultralytics.data.dataset import PolygonSemsegDataset, SemsegDataset, add_po
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
 from ultralytics.utils import DEFAULT_CFG, RANK
+from ultralytics.nn.tasks import SemanticSegmentationModel
 from ultralytics.utils.plotting import colors
 from ultralytics.utils.torch_utils import torch_distributed_zero_first
 
