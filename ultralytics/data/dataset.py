@@ -713,8 +713,6 @@ class SemsegDataset(BaseDataset):
         self.ignore_label = 255
         self.label_mapping = self._parse_label_mapping(self.data.get("label_mapping"))
         self.mask_files = []
-        self.mask_ims = []
-        self.mask_npy_files = []
         super().__init__(*args, channels=self.data.get("channels", 3), **kwargs)
 
     def _parse_label_mapping(self, mapping):
@@ -854,8 +852,6 @@ class SemsegDataset(BaseDataset):
             raise RuntimeError(f"No valid images found in {cache_path}. {HELP_URL}")
         self.im_files = [lb["im_file"] for lb in labels]
         self.mask_files = [lb["mask_file"] for lb in labels]
-        self.mask_npy_files = [Path(f).with_suffix(".npy") for f in self.mask_files]
-        self.mask_ims = [None] * len(labels)
         return labels
 
     def load_image(self, i, rect_mode=True):
@@ -923,7 +919,6 @@ class SemsegDataset(BaseDataset):
         self.batch = bi  # batch index of image
 
         self.mask_files = [lb["mask_file"] for lb in self.labels]
-        self.mask_npy_files = [Path(f).with_suffix(".npy") for f in self.mask_files]
 
     def _fallback_mask_shape(self, index: int, image_shape: tuple[int, int] | None = None) -> tuple[int, int]:
         """Resolve fallback mask shape when source mask is missing/corrupt."""
@@ -958,109 +953,6 @@ class SemsegDataset(BaseDataset):
         if self.label_mapping:
             mask = self.convert_label(mask, inverse=False)
         return mask.astype(np.uint8, copy=False)
-
-    def cache_masks_to_disk(self, i: int) -> None:
-        """Save a semantic mask as an uncompressed *.npy file for faster loading."""
-        fn = self.mask_npy_files[i]
-        if fn.exists() or not fn.parent.exists() or not os.access(fn.parent, os.W_OK):
-            return
-        np.save(fn.as_posix(), self.load_mask(i), allow_pickle=False)
-
-    def cache_images(self) -> None:
-        """Cache images and semantic masks to memory or disk."""
-        super().cache_images()  # image cache from BaseDataset
-        if self.cache not in {"ram", "disk"}:
-            return
-
-        b, gb = 0, 1 << 30
-        fcn, storage = (self.cache_masks_to_disk, "Disk") if self.cache == "disk" else (self.load_mask, "RAM")
-        with ThreadPool(NUM_THREADS) as pool:
-            results = pool.imap(fcn, range(self.ni))
-            pbar = TQDM(enumerate(results), total=self.ni, disable=LOCAL_RANK > 0)
-            for i, x in pbar:
-                if self.cache == "disk":
-                    if self.mask_npy_files[i].exists():
-                        b += self.mask_npy_files[i].stat().st_size
-                else:
-                    self.mask_ims[i] = x
-                    b += x.nbytes
-                pbar.desc = f"{self.prefix}Caching semantic masks ({b / gb:.1f}GB {storage})"
-            pbar.close()
-
-    def check_cache_disk(self, safety_margin: float = 0.5) -> bool:
-        """Check if there's enough disk space for image + mask caching."""
-        import shutil
-
-        b, gb = 0, 1 << 30
-        n = min(self.ni, 30)
-        for _ in range(n):
-            i = random.randint(0, self.ni - 1)
-            im_file, mask_file = self.im_files[i], self.mask_files[i]
-
-            im = imread(im_file, flags=self.cv2_flag)
-            if im is not None:
-                b += im.nbytes
-            else:
-                continue
-
-            mask = self._read_mask_file(mask_file)
-            if mask is not None:
-                b += mask.nbytes
-            else:
-                h, w = self._fallback_mask_shape(i)
-                b += h * w
-
-            if not os.access(Path(im_file).parent, os.W_OK):
-                self.cache = None
-                LOGGER.warning(f"{self.prefix}Skipping caching images to disk, directory not writable")
-                return False
-            mask_parent = Path(mask_file).parent
-            if mask_parent.exists() and not os.access(mask_parent, os.W_OK):
-                self.cache = None
-                LOGGER.warning(f"{self.prefix}Skipping caching masks to disk, directory not writable: {mask_parent}")
-                return False
-
-        disk_required = b * self.ni / n * (1 + safety_margin)
-        total, _used, free = shutil.disk_usage(Path(self.im_files[0]).parent)
-        if disk_required > free:
-            self.cache = None
-            LOGGER.warning(
-                f"{self.prefix}{disk_required / gb:.1f}GB disk space required for image+mask caching, "
-                f"with {int(safety_margin * 100)}% safety margin but only "
-                f"{free / gb:.1f}/{total / gb:.1f}GB free, not caching"
-            )
-            return False
-        return True
-
-    def check_cache_ram(self, safety_margin: float = 0.5) -> bool:
-        """Check if there's enough RAM for image + mask caching."""
-        b, gb = 0, 1 << 30
-        n = min(self.ni, 30)
-        for _ in range(n):
-            i = random.randint(0, self.ni - 1)
-            im = imread(self.im_files[i], flags=self.cv2_flag)
-            if im is None:
-                continue
-            b += im.nbytes  # images are stored at original size (no pre-resize)
-
-            mask = self._read_mask_file(self.mask_files[i])
-            if mask is not None:
-                b += mask.nbytes
-            else:
-                h, w = self._fallback_mask_shape(i)
-                b += h * w
-
-        mem_required = b * self.ni / n * (1 + safety_margin)
-        mem = __import__("psutil").virtual_memory()
-        if mem_required > mem.available:
-            self.cache = None
-            LOGGER.warning(
-                f"{self.prefix}{mem_required / gb:.1f}GB RAM required to cache images+masks "
-                f"with {int(safety_margin * 100)}% safety margin but only "
-                f"{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, not caching"
-            )
-            return False
-        return True
 
     def update_labels_info(self, label):
         """Update label info — minimal for semantic segmentation.
@@ -1142,23 +1034,7 @@ class SemsegDataset(BaseDataset):
         Returns:
             (np.ndarray): Semantic mask array (H, W) with class IDs, 255 for ignore.
         """
-        mask = None
-        if self.cache == "ram":
-            mask = self.mask_ims[index]
-            if mask is None:
-                mask = self.load_mask(index, image_shape=image_shape)
-                self.mask_ims[index] = mask
-            return mask
-
-        fn = self.mask_npy_files[index]
-        if fn.exists():
-            try:
-                mask = np.load(fn)
-            except Exception as e:
-                LOGGER.warning(f"{self.prefix}Removing corrupt mask *.npy file {fn} due to: {e}")
-                fn.unlink(missing_ok=True)
-        if mask is None:
-            mask = self.load_mask(index, image_shape=image_shape)
+        mask = self.load_mask(index, image_shape=image_shape)
         return mask
 
     def get_image_and_label(self, index):
@@ -1341,10 +1217,8 @@ class PolygonSemsegDataset(SemsegDataset):
         if not labels:
             raise RuntimeError(f"No valid images found in {cache_path}. {HELP_URL}")
         self.im_files = [lb["im_file"] for lb in labels]
-        # No source mask files; rasterized masks are cached as <image>.mask.npy alongside images.
+        # No source mask files; rasterized masks are generated on the fly from polygons.
         self.mask_files = [""] * len(labels)
-        self.mask_npy_files = [Path(f).with_suffix(".mask.npy") for f in self.im_files]
-        self.mask_ims = [None] * len(labels)
         return labels
 
     def load_mask(self, index: int, image_shape: tuple[int, int] | None = None) -> np.ndarray:
@@ -1381,65 +1255,10 @@ class PolygonSemsegDataset(SemsegDataset):
         return im.shape[:2] if im is not None else (self.imgsz, self.imgsz)
 
     def set_rectangle(self):
-        """Aspect-ratio batching; rebuild mask_npy_files from reordered im_files (no source masks)."""
+        """Aspect-ratio batching; keep mask_files aligned with reordered im_files (no source masks)."""
         # Skip SemsegDataset.set_rectangle (it reads "mask_file" from each label, which we don't store).
         BaseDataset.set_rectangle(self)
         self.mask_files = [""] * len(self.im_files)
-        self.mask_npy_files = [Path(f).with_suffix(".mask.npy") for f in self.im_files]
-
-    def check_cache_disk(self, safety_margin: float = 0.5) -> bool:
-        """Estimate disk space for image + rasterized-mask caching (mask byte cost ≈ H*W)."""
-        import shutil
-
-        b, gb = 0, 1 << 30
-        n = min(self.ni, 30)
-        for _ in range(n):
-            i = random.randint(0, self.ni - 1)
-            im = imread(self.im_files[i], flags=self.cv2_flag)
-            if im is None:
-                continue
-            b += im.nbytes
-            h, w = self._fallback_mask_shape(i)
-            b += h * w
-            if not os.access(Path(self.im_files[i]).parent, os.W_OK):
-                self.cache = None
-                LOGGER.warning(f"{self.prefix}Skipping caching to disk, directory not writable")
-                return False
-        disk_required = b * self.ni / n * (1 + safety_margin)
-        total, _used, free = shutil.disk_usage(Path(self.im_files[0]).parent)
-        if disk_required > free:
-            self.cache = None
-            LOGGER.warning(
-                f"{self.prefix}{disk_required / gb:.1f}GB disk space required for image+mask caching, "
-                f"with {int(safety_margin * 100)}% safety margin but only "
-                f"{free / gb:.1f}/{total / gb:.1f}GB free, not caching"
-            )
-            return False
-        return True
-
-    def check_cache_ram(self, safety_margin: float = 0.5) -> bool:
-        """Estimate RAM for image + rasterized-mask caching."""
-        b, gb = 0, 1 << 30
-        n = min(self.ni, 30)
-        for _ in range(n):
-            i = random.randint(0, self.ni - 1)
-            im = imread(self.im_files[i], flags=self.cv2_flag)
-            if im is None:
-                continue
-            b += im.nbytes
-            h, w = self._fallback_mask_shape(i)
-            b += h * w
-        mem_required = b * self.ni / n * (1 + safety_margin)
-        mem = __import__("psutil").virtual_memory()
-        if mem_required > mem.available:
-            self.cache = None
-            LOGGER.warning(
-                f"{self.prefix}{mem_required / gb:.1f}GB RAM required to cache images+masks "
-                f"with {int(safety_margin * 100)}% safety margin but only "
-                f"{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, not caching"
-            )
-            return False
-        return True
 
 
 class SemanticFormat:
