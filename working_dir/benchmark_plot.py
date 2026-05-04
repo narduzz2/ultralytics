@@ -42,6 +42,18 @@ METRIC_TITLE_TOKENS = {
 #         or a metric dict with keys like:
 #         {"ap", "ap50", "ap75", "ap_small", "ap_medium", "ap_large"}
 
+DEIMV2_ULTRALYTICS_OBJ365_IMGSZ_SWEEP = [
+    # T4 TensorRT v10.11, rtdetr_best_op17_nosim_norope_*_fp32attn_debug_fp16.engine.
+    # The 640 point was exported before imgsz was added to artifact names.
+    # Labels use decoder layer count; export_eval_idx=eidx means l{eidx + 1}.
+    ("480/l2/q100", 7.7, {"ap": 55.8, "ap50": 73.5, "ap75": 60.7, "ap_small": 35.5, "ap_medium": 61.5, "ap_large": 75.2}, 0.1),
+    ("512/l3", 9.1, {"ap": 57.5, "ap50": 75.0, "ap75": 62.4, "ap_small": 37.8, "ap_medium": 63.1, "ap_large": 76.4}, 0.2),
+    ("576/l4", 11.6, {"ap": 58.8, "ap50": 76.5, "ap75": 64.0, "ap_small": 40.6, "ap_medium": 64.1, "ap_large": 76.9}, 0.2),
+    ("640/l6", 14.2, {"ap": 59.8, "ap50": 77.7, "ap75": 65.3, "ap_small": 43.3, "ap_medium": 64.8, "ap_large": 77.4}, 0.4),
+    ("704/l6", 19.1, {"ap": 60.3, "ap50": 77.9, "ap75": 66.0, "ap_small": 43.9, "ap_medium": 65.2, "ap_large": 77.7}, 0.9),
+    ("800/l6", 24.8, {"ap": 60.9, "ap50": 78.3, "ap75": 66.5, "ap_small": 45.3, "ap_medium": 65.3, "ap_large": 77.2}, 0.9),
+]
+
 BENCHMARKS = {
     "m5": {
         "title": "Object Detection Models: Latency vs mAP (Apple M5 CPU, ONNX)",
@@ -339,6 +351,9 @@ BENCHMARKS = {
                 ("l4", 7.6, {"ap": 56.5, "ap50": 74.1, "ap75": 61.6, "ap_small": 41.3, "ap_medium": 61.0, "ap_large": 70.9}),
                 ("l", 8.1, {"ap": 56.7, "ap50": 74.3, "ap75": 61.8, "ap_small": 41.7, "ap_medium": 61.1, "ap_large": 71.0}),
             ],
+            "YOLO26_Dfine (obj365)": [
+                ("xl", 13.1, {"ap": 58.5, "ap50": 75.6, "ap75": 63.9, "ap_small": 43.8, "ap_medium": 62.7, "ap_large": 74.0}, 0.3),
+            ],
             "LW-DETR (obj365)": [
                 # LW-DETR obj365 results as reported in ECDet paper (arXiv 2603.18739), TRT v10.6
                 ("n", 2.0, {"ap": 42.6}),
@@ -348,7 +363,7 @@ BENCHMARKS = {
                 ("x", 18.4, {"ap": 58.3, "ap50": 76.9, "ap75": 63.3, "ap_small": 40.9, "ap_medium": 63.3, "ap_large": 74.8}),
             ],
             "DEIMv2 (Ultralytics)": [
-                # ("l", 10.7, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
+                ("l", 10.7, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
                 ("xl", 14.6, {"ap": 58.0, "ap50": 75.3, "ap75": 63.2, "ap_small": 39.6, "ap_medium": 63.3, "ap_large": 76.3}),
                 ("xxl", 32.6, {"ap": 59.8, "ap50": 77.1, "ap75": 65.3, "ap_small": 42.8, "ap_medium": 65.5, "ap_large": 77.1}),
             ],
@@ -356,6 +371,8 @@ BENCHMARKS = {
                 ("xl4", 13.9, {"ap": 59.5, "ap50": 77.1, "ap75": 65.1, "ap_small": 42.7, "ap_medium": 64.8, "ap_large": 76.8}),
                 ("xl6", 14.3, {"ap": 59.8, "ap50": 77.7, "ap75": 65.3, "ap_small": 43.3, "ap_medium": 64.8, "ap_large": 77.4}),
             ],
+            # Comment this series in/out independently from the XL/XL6 baseline above.
+            "DEIMv2 (Ultralytics, obj365, imgsz sweep)": DEIMV2_ULTRALYTICS_OBJ365_IMGSZ_SWEEP,
             # "DINOv3-RTDETR": [
             #     ("s", 4.3, {"ap": 50.3, "ap50": 69.0, "ap75": 54.4, "ap_small": 27.8, "ap_medium": 55.8, "ap_large": 72.5}),
             # ],
@@ -440,14 +457,18 @@ BENCHMARKS = {
                 ("xl4", 13.9, {"ap": 59.5, "ap50": 77.1, "ap75": 65.1, "ap_small": 42.7, "ap_medium": 64.8, "ap_large": 76.8}),
                 ("xl6", 14.3, {"ap": 59.8, "ap50": 77.7, "ap75": 65.3, "ap_small": 43.3, "ap_medium": 64.8, "ap_large": 77.4}),
             ],
+            "DEIMv2 (Ultralytics, obj365, imgsz sweep)": DEIMV2_ULTRALYTICS_OBJ365_IMGSZ_SWEEP,
             "DEIMv2 (Ultralytics)": [
-                # ("l", 10.7, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
+                ("l", 10.7, {"ap": 56.2, "ap50": 73.5, "ap75": 61.2, "ap_small": 37.1, "ap_medium": 61.3, "ap_large": 74.9}),
                 ("xl", 14.6, {"ap": 58.0, "ap50": 75.3, "ap75": 63.2, "ap_small": 39.6, "ap_medium": 63.3, "ap_large": 76.3}),
                 ("xxl", 32.6, {"ap": 59.8, "ap50": 77.1, "ap75": 65.3, "ap_small": 42.8, "ap_medium": 65.5, "ap_large": 77.1}),
             ],
             "YOLO26_RTDETR (obj365)": [
                 ("l4", 7.6, {"ap": 56.5, "ap50": 74.1, "ap75": 61.6, "ap_small": 41.3, "ap_medium": 61.0, "ap_large": 70.9}),
                 ("l", 8.1, {"ap": 56.7, "ap50": 74.3, "ap75": 61.8, "ap_small": 41.7, "ap_medium": 61.1, "ap_large": 71.0}),
+            ],
+            "YOLO26_Dfine (obj365)": [
+                ("xl", 13.1, {"ap": 58.5, "ap50": 75.6, "ap75": 63.9, "ap_small": 43.8, "ap_medium": 62.7, "ap_large": 74.0}, 0.3),
             ],
 
             "YOLO26_RTDETR": [
@@ -456,7 +477,7 @@ BENCHMARKS = {
         },
     },
     "t4_deimv2_xl_obj365_analysis": {
-        "title": "DEIMv2-XL obj365: Decoder/Query Analysis (Tesla T4 GPU, TensorRT v10.11)",
+        "title": "DEIMv2-XL obj365: Export Variant Analysis (Tesla T4 GPU, TensorRT v10.11)",
         "models": {
             "Decoder Layers": [
                 # Default model uses 6 decoder layers. export_eval_idx=eidx means eidx+1 layers are kept.
@@ -470,6 +491,7 @@ BENCHMARKS = {
                 ("Q100", 13.5, {"ap": 58.7}),
                 ("Q300", 13.9, {"ap": 59.2}),
             ],
+            "Image Size / Export Variants": DEIMV2_ULTRALYTICS_OBJ365_IMGSZ_SWEEP,
         },
     },
     "t4_deim_backbone_map": {
@@ -494,6 +516,7 @@ MODEL_STYLES = {
     "YOLO26-reported": ("o", -12),
     "YOLO26_RTDETR": ("^", -12),
     "YOLO26_RTDETR (obj365)": ("^", 8),
+    "YOLO26_Dfine (obj365)": ("D", -12),
     "DINOv3-RTDETR": ("X", 8),
     "DINOv3-RTDETR (obj365)": ("X", -12),
     "DINOv3-STA-RTDETR": ("X", -12),
@@ -516,8 +539,10 @@ MODEL_STYLES = {
     "RT-DETR (obj365)": ("v", 8),
     "DEIMv2 (Ultralytics)": ("p", 8),
     "DEIMv2 (Ultralytics, obj365)": ("p", -12),
+    "DEIMv2 (Ultralytics, obj365, imgsz sweep)": ("*", 14),
     "Decoder Layers": ("o", 8),
     "Queries @ 4L": ("s", -12),
+    "Image Size / Export Variants": ("*", 14),
     "DINOv3 Small + DEIM": ("X", 8),
     "ConvNeXt-S + DEIM": ("D", -12),
 }
