@@ -54,6 +54,16 @@ DEIMV2_ULTRALYTICS_OBJ365_IMGSZ_SWEEP = [
     ("800/l6", 24.8, {"ap": 60.9, "ap50": 78.3, "ap75": 66.5, "ap_small": 45.3, "ap_medium": 65.3, "ap_large": 77.2}, 0.9),
 ]
 
+RF_DETR_OBJ365_TOPK_IMGSZ = [
+    # Labels include model scale and profiled ONNX image size.
+    ("n/384", 2.7, {"ap": 48.4, "ap50": 67.5, "ap75": 51.7, "ap_small": 25.3, "ap_medium": 53.6, "ap_large": 71.0}),
+    ("s/512", 4.0, {"ap": 53.0, "ap50": 72.0, "ap75": 57.1, "ap_small": 31.8, "ap_medium": 58.4, "ap_large": 73.1}),
+    ("m/576", 5.0, {"ap": 54.7, "ap50": 73.6, "ap75": 59.1, "ap_small": 35.9, "ap_medium": 59.8, "ap_large": 73.7}),
+    ("l/704", 7.8, {"ap": 56.5, "ap50": 75.1, "ap75": 61.2, "ap_small": 39.0, "ap_medium": 61.0, "ap_large": 74.0}),
+    ("x/700", 16.9, {"ap": 58.6, "ap50": 77.5, "ap75": 64.0, "ap_small": 40.8, "ap_medium": 64.3, "ap_large": 76.3}),
+    ("xxl/880", 26.6, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
+]
+
 BENCHMARKS = {
     "m5": {
         "title": "Object Detection Models: Latency vs mAP (Apple M5 CPU, ONNX)",
@@ -339,20 +349,17 @@ BENCHMARKS = {
                 ("l", 8.2, {"ap": 55.3, "ap50": 73.0, "ap75": 60.2, "ap_small": 39.6, "ap_medium": 59.3, "ap_large": 70.7}),
                 ("x", 13.5, {"ap": 56.5, "ap50": 74.0, "ap75": 61.6, "ap_small": 41.1, "ap_medium": 60.8, "ap_large": 71.5}),
             ],
-            "RF-DETR (obj365, TopK)": [
-                ("n", 2.7, {"ap": 48.4, "ap50": 67.5, "ap75": 51.7, "ap_small": 25.3, "ap_medium": 53.6, "ap_large": 71.0}),
-                ("s", 4.0, {"ap": 53.0, "ap50": 72.0, "ap75": 57.1, "ap_small": 31.8, "ap_medium": 58.4, "ap_large": 73.1}),
-                ("m", 5.0, {"ap": 54.7, "ap50": 73.6, "ap75": 59.1, "ap_small": 35.9, "ap_medium": 59.8, "ap_large": 73.7}),
-                ("l", 7.8, {"ap": 56.5, "ap50": 75.1, "ap75": 61.2, "ap_small": 39.0, "ap_medium": 61.0, "ap_large": 74.0}),
-                ("x", 16.9, {"ap": 58.6, "ap50": 77.5, "ap75": 64.0, "ap_small": 40.8, "ap_medium": 64.3, "ap_large": 76.3}),
-                ("xxl", 26.6, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
-            ],
+            "RF-DETR (obj365, TopK)": RF_DETR_OBJ365_TOPK_IMGSZ,
             "YOLO26_RTDETR (obj365)": [
                 ("l4", 7.6, {"ap": 56.5, "ap50": 74.1, "ap75": 61.6, "ap_small": 41.3, "ap_medium": 61.0, "ap_large": 70.9}),
                 ("l", 8.1, {"ap": 56.7, "ap50": 74.3, "ap75": 61.8, "ap_small": 41.7, "ap_medium": 61.1, "ap_large": 71.0}),
             ],
             "YOLO26_Dfine (obj365)": [
                 ("xl", 13.1, {"ap": 58.5, "ap50": 75.6, "ap75": 63.9, "ap_small": 43.8, "ap_medium": 62.7, "ap_large": 74.0}, 0.3),
+            ],
+            "ConvNeXt D-FINE": [
+                ("t", 11.8, {"ap": 55.1, "ap50": 72.6, "ap75": 60.0, "ap_small": 37.6, "ap_medium": 59.6, "ap_large": 72.8}, 0.2),
+                ("s", 15.1, {"ap": 56.9, "ap50": 74.5, "ap75": 62.1, "ap_small": 40.4, "ap_medium": 61.9, "ap_large": 74.0}, 0.5),
             ],
             "LW-DETR (obj365)": [
                 # LW-DETR obj365 results as reported in ECDet paper (arXiv 2603.18739), TRT v10.6
@@ -445,14 +452,7 @@ BENCHMARKS = {
     "rf_compare": {
         "title": "Object Detection Models: Latency vs mAP (Tesla T4 GPU, TensorRT v10.11)",
         "models": {
-            "RF-DETR (obj365, TopK)": [
-                ("n", 2.7, {"ap": 48.4, "ap50": 67.5, "ap75": 51.7, "ap_small": 25.3, "ap_medium": 53.6, "ap_large": 71.0}),
-                ("s", 4.0, {"ap": 53.0, "ap50": 72.0, "ap75": 57.1, "ap_small": 31.8, "ap_medium": 58.4, "ap_large": 73.1}),
-                ("m", 5.0, {"ap": 54.7, "ap50": 73.6, "ap75": 59.1, "ap_small": 35.9, "ap_medium": 59.8, "ap_large": 73.7}),
-                ("l", 7.8, {"ap": 56.5, "ap50": 75.1, "ap75": 61.2, "ap_small": 39.0, "ap_medium": 61.0, "ap_large": 74.0}),
-                ("x", 16.9, {"ap": 58.6, "ap50": 77.5, "ap75": 64.0, "ap_small": 40.8, "ap_medium": 64.3, "ap_large": 76.3}),
-                ("xxl", 26.6, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
-            ],
+            "RF-DETR (obj365, TopK)": RF_DETR_OBJ365_TOPK_IMGSZ,
             "DEIMv2 (Ultralytics, obj365)": [
                 ("xl4", 13.9, {"ap": 59.5, "ap50": 77.1, "ap75": 65.1, "ap_small": 42.7, "ap_medium": 64.8, "ap_large": 76.8}),
                 ("xl6", 14.3, {"ap": 59.8, "ap50": 77.7, "ap75": 65.3, "ap_small": 43.3, "ap_medium": 64.8, "ap_large": 77.4}),
@@ -469,6 +469,10 @@ BENCHMARKS = {
             ],
             "YOLO26_Dfine (obj365)": [
                 ("xl", 13.1, {"ap": 58.5, "ap50": 75.6, "ap75": 63.9, "ap_small": 43.8, "ap_medium": 62.7, "ap_large": 74.0}, 0.3),
+            ],
+            "ConvNeXt D-FINE": [
+                ("t", 11.8, {"ap": 55.1, "ap50": 72.6, "ap75": 60.0, "ap_small": 37.6, "ap_medium": 59.6, "ap_large": 72.8}, 0.2),
+                ("s", 15.1, {"ap": 56.9, "ap50": 74.5, "ap75": 62.1, "ap_small": 40.4, "ap_medium": 61.9, "ap_large": 74.0}, 0.5),
             ],
 
             "YOLO26_RTDETR": [
@@ -537,6 +541,7 @@ MODEL_STYLES = {
     "D-FINE (obj365)": ("D", 8),
     "RT-DETR": ("v", -12),
     "RT-DETR (obj365)": ("v", 8),
+    "ConvNeXt D-FINE": ("h", 8),
     "DEIMv2 (Ultralytics)": ("p", 8),
     "DEIMv2 (Ultralytics, obj365)": ("p", -12),
     "DEIMv2 (Ultralytics, obj365, imgsz sweep)": ("*", 14),
