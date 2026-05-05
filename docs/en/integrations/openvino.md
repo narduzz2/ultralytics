@@ -271,7 +271,6 @@ Benchmarks below run on Intel® Core™ Ultra™ 7 258V and Intel® Core™ Ultr
             | YOLO26x | OpenVINO      | FP16      | ✅      | 107.1     | 0.6563              | 32.87                  |
             | YOLO26x | OpenVINO      | INT8      | ✅      | 54.8      | 0.6463              | 25.88                  |
 
-
 #### Intel® Core™ Ultra™ 7 155H
 
 !!! tip "Benchmarks"
