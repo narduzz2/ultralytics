@@ -128,7 +128,7 @@ def export_partner_format(self, prefix=colorstr("Partner Format:")):
         model=self.model,
         output_dir=str(self.file).replace(self.file.suffix, "_partner_model/"),
         metadata=self.metadata,
-        dataset=partial(self.get_int8_calibration_dataloader, prefix) if self.args.int8 else None,
+        dataset=self.get_int8_calibration_dataloader(prefix),
         prefix=prefix,
     )
 ```
