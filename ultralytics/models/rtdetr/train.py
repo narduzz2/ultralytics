@@ -108,7 +108,9 @@ class RTDETRTrainer(DetectionTrainer):
         if backbone_lr_ratio <= 0:
             raise ValueError(f"Invalid backbone_lr_ratio={backbone_lr_ratio}. Expected > 0.")
         if backbone_lr_ratio == 1.0:
-            return super().build_optimizer(model, name=name, lr=lr, momentum=momentum, decay=decay, iterations=iterations)
+            return super().build_optimizer(
+                model, name=name, lr=lr, momentum=momentum, decay=decay, iterations=iterations
+            )
         g = [{}, {}, {}, {}, {}, {}, {}, {}]  # 8 groups: head 0-3, backbone 4-7 (indices 3, 7 are muon)
         bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)
         if name == "auto":
@@ -163,13 +165,48 @@ class RTDETRTrainer(DetectionTrainer):
             {"params": list(g[2].values()), **optim_args, "param_group": "head_bias"},
         ]
         back_groups = [
-            {"params": list(g[4].values()), **optim_args, "lr": backbone_lr, "weight_decay": decay, "param_group": "backbone_weight"},
-            {"params": list(g[5].values()), **optim_args, "lr": backbone_lr, "weight_decay": 0.0, "param_group": "backbone_bn"},
-            {"params": list(g[6].values()), **optim_args, "lr": backbone_lr, "weight_decay": 0.0, "param_group": "backbone_bias"},
+            {
+                "params": list(g[4].values()),
+                **optim_args,
+                "lr": backbone_lr,
+                "weight_decay": decay,
+                "param_group": "backbone_weight",
+            },
+            {
+                "params": list(g[5].values()),
+                **optim_args,
+                "lr": backbone_lr,
+                "weight_decay": 0.0,
+                "param_group": "backbone_bn",
+            },
+            {
+                "params": list(g[6].values()),
+                **optim_args,
+                "lr": backbone_lr,
+                "weight_decay": 0.0,
+                "param_group": "backbone_bias",
+            },
         ]
         if use_muon:
-            head_groups.append({"params": list(g[3].values()), **optim_args, "weight_decay": decay, "use_muon": True, "param_group": "head_muon"})
-            back_groups.append({"params": list(g[7].values()), **optim_args, "lr": backbone_lr, "weight_decay": decay, "use_muon": True, "param_group": "backbone_muon"})
+            head_groups.append(
+                {
+                    "params": list(g[3].values()),
+                    **optim_args,
+                    "weight_decay": decay,
+                    "use_muon": True,
+                    "param_group": "head_muon",
+                }
+            )
+            back_groups.append(
+                {
+                    "params": list(g[7].values()),
+                    **optim_args,
+                    "lr": backbone_lr,
+                    "weight_decay": decay,
+                    "use_muon": True,
+                    "param_group": "backbone_muon",
+                }
+            )
 
         params = [pg for pg in head_groups + back_groups if pg["params"]]
         optimizer = MuSGD(params=params, muon=0.2, sgd=1.0) if use_muon else getattr(optim, name)(params=params)
