@@ -585,6 +585,7 @@ nav:
               - Clearml Logging: yolov5/tutorials/clearml_logging_integration.md
   - Integrations:
       - Integrations: integrations/index.md
+      - Contribute an Integration: integrations/contribute.md
       - Albumentations: integrations/albumentations.md
       - Amazon SageMaker: integrations/amazon-sagemaker.md
       - Axelera: integrations/axelera.md
