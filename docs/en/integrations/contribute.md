@@ -512,11 +512,11 @@ All export function arguments must include comprehensive documentation with expl
 ```markdown
 The integration supports the following configuration options:
 
-| Parameter | Type   | Default     | Description             |
-| --------- | ------ | ----------- | ----------------------- |
-| `param1`  | `str`  | `"default"` | Description of param1   |
-| `param2`  | `int`  | `100`       | Description of param2   |
-| `param3`  | `bool` | `True`      | Description of param3   |
+| Parameter | Type   | Default     | Description           |
+| --------- | ------ | ----------- | --------------------- |
+| `param1`  | `str`  | `"default"` | Description of param1 |
+| `param2`  | `int`  | `100`       | Description of param2 |
+| `param3`  | `bool` | `True`      | Description of param3 |
 ```
 
 #### Benchmarks
