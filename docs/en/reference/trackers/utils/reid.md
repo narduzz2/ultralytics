@@ -13,4 +13,8 @@ keywords: TODO ADD KEYWORDS
 
 ## ::: ultralytics.trackers.utils.reid.ReID
 
+<br><br><hr><br>
+
+## ::: ultralytics.trackers.utils.reid.build_encoder
+
 <br><br>
