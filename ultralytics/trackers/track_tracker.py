@@ -480,6 +480,7 @@ class TRACKTRACK:
         g = lambda k, d: getattr(args, k, d)  # noqa: E731 - local getter for brevity
         self.det_thr = g("det_thr", 0.6)
         self.match_thr = g("match_thresh", 0.7)
+        self.lost_match_thr = g("lost_match_thr", 0.0)
         self.penalty_p = g("penalty_p", 0.2)
         self.penalty_q = g("penalty_q", 0.4)
         self.reduce_step = g("reduce_step", 0.05)
@@ -640,6 +641,18 @@ class TRACKTRACK:
             for track in unconfirmed:
                 track.mark_removed()
                 removed.append(track)
+
+
+        if self.lost_match_thr > 0 and leftover_remain:
+            still_lost = [t for t in pool if t.state == TrackState.Lost and t not in lost]
+            if still_lost:
+                _, l_cost = self._cost_matrix(still_lost, leftover_remain)
+                l_matches, _, l_unmatched = _iterative_associate(l_cost, self.lost_match_thr, self.reduce_step)
+                for t_idx, d_idx in l_matches:
+                    track, det = still_lost[t_idx], leftover_remain[d_idx]
+                    track.re_activate(det, self.frame_id, new_id=False)
+                    refind.append(track)
+                leftover_remain = [leftover_remain[i] for i in l_unmatched]
 
         # TAI: spawn new tracks only from candidates that survive NMS against existing tracks
         active = [track for track in self.tracked_stracks if track.state == TrackState.Tracked] + activated
