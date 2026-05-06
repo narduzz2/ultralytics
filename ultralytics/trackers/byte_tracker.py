@@ -11,7 +11,7 @@ from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
 from .utils import matching
 from .utils.kalman_filter import KalmanFilterXYAH
-from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc, remove_duplicate_stracks, sub_stracks
+from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc
 
 
 class STrack(BaseTrack):
@@ -295,7 +295,7 @@ class BYTETracker:
             else:
                 tracked_stracks.append(track)
         # Step 2: First association, with high score detection boxes
-        strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
+        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
         # Predict the current location with KF
         self.multi_predict(strack_pool)
         if hasattr(self, "gmc") and img is not None:
@@ -404,7 +404,3 @@ class BYTETracker:
         self.frame_id = 0
         self.kalman_filter = self.get_kalmanfilter()
         self.reset_id()
-
-    joint_stracks = staticmethod(joint_stracks)
-    sub_stracks = staticmethod(sub_stracks)
-    remove_duplicate_stracks = staticmethod(remove_duplicate_stracks)

@@ -26,7 +26,7 @@ from .basetrack import BaseTrack, TrackState
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYWH
 from .utils.matching import iou_matrix
-from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc, remove_duplicate_stracks, sub_stracks
+from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc
 
 # Corner index arrays for angle-distance vectorization: LT, LB, RT, RB of an (x1,y1,x2,y2) box
 _CORNER_DX_IDX = np.array([0, 0, 2, 2])
@@ -466,12 +466,6 @@ class TRACKTRACK:
         >>> tracked_objects = tracker.update(yolo_results, img=image)
     """
 
-    # Purely-structural list helpers shared with BYTETracker; they only touch attributes
-    # that TTSTrack also exposes (.track_id / .frame_id / .start_frame / .xyxy).
-    joint_stracks = staticmethod(joint_stracks)
-    sub_stracks = staticmethod(sub_stracks)
-    remove_duplicate_stracks = staticmethod(remove_duplicate_stracks)
-
     def __init__(self, args, frame_rate: int = 30):
         """Initialize from a tracker config. See `ultralytics/cfg/trackers/tracktrack.yaml`."""
         self.tracked_stracks: list[TTSTrack] = []
@@ -595,7 +589,7 @@ class TRACKTRACK:
         unconfirmed, tracked = [], []
         for track in self.tracked_stracks:
             (unconfirmed if not track.is_activated else tracked).append(track)
-        pool = self.joint_stracks(tracked, self.lost_stracks)
+        pool = joint_stracks(tracked, self.lost_stracks)
 
         # GMC + Kalman predict
         if img is not None:

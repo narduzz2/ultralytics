@@ -10,7 +10,7 @@ import numpy as np
 from .basetrack import TrackState
 from .byte_tracker import BYTETracker, STrack
 from .utils import matching
-from .utils.stracks import merge_track_pools
+from .utils.stracks import joint_stracks, merge_track_pools
 
 
 class FastSTrack(STrack):
@@ -233,7 +233,7 @@ class FASTTracker(BYTETracker):
                 tracked_stracks.append(track)
 
         # --- First association (high-score detections) ---
-        strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
+        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
         self.multi_predict(strack_pool)
         dists = self.get_dists(strack_pool, detections)
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)

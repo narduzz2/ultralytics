@@ -41,12 +41,12 @@ def merge_track_pools(
         >>> merge_track_pools(self, activated_stracks, refind_stracks, lost_stracks, removed_stracks)
     """
     tracker.tracked_stracks = [t for t in tracker.tracked_stracks if t.state == TrackState.Tracked]
-    tracker.tracked_stracks = tracker.joint_stracks(tracker.tracked_stracks, activated)
-    tracker.tracked_stracks = tracker.joint_stracks(tracker.tracked_stracks, refind)
-    tracker.lost_stracks = tracker.sub_stracks(tracker.lost_stracks, tracker.tracked_stracks)
+    tracker.tracked_stracks = joint_stracks(tracker.tracked_stracks, activated)
+    tracker.tracked_stracks = joint_stracks(tracker.tracked_stracks, refind)
+    tracker.lost_stracks = sub_stracks(tracker.lost_stracks, tracker.tracked_stracks)
     tracker.lost_stracks.extend(lost)
-    tracker.lost_stracks = tracker.sub_stracks(tracker.lost_stracks, tracker.removed_stracks)
-    tracker.tracked_stracks, tracker.lost_stracks = tracker.remove_duplicate_stracks(
+    tracker.lost_stracks = sub_stracks(tracker.lost_stracks, tracker.removed_stracks)
+    tracker.tracked_stracks, tracker.lost_stracks = remove_duplicate_stracks(
         tracker.tracked_stracks, tracker.lost_stracks
     )
     tracker.removed_stracks.extend(removed)

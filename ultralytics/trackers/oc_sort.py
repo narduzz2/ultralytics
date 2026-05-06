@@ -9,7 +9,7 @@ import numpy as np
 from .basetrack import TrackState
 from .byte_tracker import BYTETracker, STrack
 from .utils import matching
-from .utils.stracks import merge_track_pools
+from .utils.stracks import joint_stracks, merge_track_pools
 
 
 class OCSortTrack(STrack):
@@ -280,7 +280,7 @@ class OCSORT(BYTETracker):
                 tracked_stracks.append(track)
 
         # Stage 1: First association with high-score detections
-        strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
+        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
         self.multi_predict(strack_pool)
         self._pre_first_associate(strack_pool, unconfirmed, img, results)
 
