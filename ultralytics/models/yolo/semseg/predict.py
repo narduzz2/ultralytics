@@ -89,7 +89,7 @@ class SemanticSegmentationPredictor(BasePredictor):
             img_path = self.batch[0][i] if isinstance(self.batch[0], list) else self.batch[0]
             # pred: [nc, H, W] logits on letterboxed input. Remove padding, then resize to original image.
             oh, ow = orig_img.shape[:2]
-            pred = ops.scale_masks(pred.unsqueeze(0), (oh, ow))[0]
+            pred = ops.scale_masks(pred.unsqueeze(0), (oh, ow), padding=False)[0]
             class_map = pred.argmax(0).cpu()  # [H, W]
             results.append(Results(orig_img, path=img_path, names=self.model.names, semantic_mask=class_map))
         return results

@@ -97,7 +97,7 @@ class SemanticSegmentationValidator(BaseValidator):
         preds = (
             F.interpolate(preds, size=self._semantic_target_shape, mode="bilinear", align_corners=False)
             if self._semantic_target_shape is not None
-            else F.interpolate(preds, scale_factor=4, mode="bilinear", align_corners=False)
+            else F.interpolate(preds, scale_factor=8, mode="bilinear", align_corners=False)
         )
         if self.nc > 1:
             pred_mask = preds.argmax(dim=1)
