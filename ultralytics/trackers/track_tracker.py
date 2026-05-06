@@ -662,9 +662,6 @@ class TRACKTRACK:
 
         merge_track_pools(self, activated, refind, lost, removed)
         return np.asarray(
-            # `frame_id == self.frame_id` filters out tracks that survived this frame in the
-            # tracked pool without being matched (their stored `idx` is stale from a previous
-            # frame, and `track.py: result[idx]` would index incorrectly).
             [track.result for track in self.tracked_stracks if track.is_activated and track.frame_id == self.frame_id],
             dtype=np.float32,
         )
