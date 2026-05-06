@@ -1295,7 +1295,7 @@ class SemanticSegmentationLoss(nn.Module):
     def _ce_loss(self, preds, masks):
         """Compute cross-entropy on flattened pixels to avoid the CUDA nll_loss2d path."""
         if self.nc == 1:
-            logits = preds.reshape(-1).sigmoid()
+            logits = preds.reshape(-1)
             target = masks.reshape(-1).float()
         else:
             logits = preds.permute(0, 2, 3, 1).reshape(-1, self.nc)
