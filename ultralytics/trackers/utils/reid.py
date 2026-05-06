@@ -70,3 +70,21 @@ class ReID:
             return [f.cpu().numpy() for f in feats]
         feats = self.model(self._crops_to_tensor(img, dets))
         return [f.cpu().numpy() for f in feats]
+
+
+def build_encoder(with_reid: bool, model: str | None):
+    """Return a ReID encoder, the native-features pass-through, or None.
+
+    Args:
+        with_reid (bool): Whether ReID is enabled at all.
+        model (str | None): `"auto"` returns a callable that converts pre-extracted backbone features to numpy arrays;
+            any other value loads a `ReID` model from that path. Ignored when `with_reid` is False.
+
+    Returns:
+        (Callable | None): A `(img, dets) -> list[np.ndarray]` encoder, or None when ReID is disabled.
+    """
+    if not with_reid:
+        return None
+    if model == "auto":
+        return lambda feats, _dets: [f.cpu().numpy() for f in feats]
+    return ReID(model)
