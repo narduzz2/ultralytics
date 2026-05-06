@@ -1821,18 +1821,10 @@ class SemanticSegment(nn.Module):
         self.stride = torch.zeros(self.nl)
 
         c_mid = ch[0]  # use P3 channel width as intermediate dimension
-
         # Final classifier
-        self.classifier = nn.Sequential(
-            Conv(c_mid, c_mid, 3),
-            nn.Conv2d(c_mid, nc, 1),
-        )
-
+        self.classifier = nn.Sequential(Conv(c_mid, c_mid, 3), nn.Conv2d(c_mid, nc, 1))
         # Auxiliary head on P4 (index 1) for training
-        if len(ch) > 1:
-            self.aux_head = nn.Sequential(Conv(ch[1], c_mid, 3), nn.Conv2d(c_mid, nc, 1))
-        else:
-            self.aux_head = None
+        self.aux_head = nn.Sequential(Conv(ch[1], c_mid, 3), nn.Conv2d(c_mid, nc, 1)) if len(ch) > 1 else None
 
     def forward(self, x):
         """Forward pass: fuse multi-scale features and predict per-pixel classes.
@@ -1841,17 +1833,15 @@ class SemanticSegment(nn.Module):
             x (list[torch.Tensor]): List of feature maps [P3, P4, P5].
 
         Returns:
-            (torch.Tensor): Logits of shape [B, nc, H/4, W/4] during training,
-                or [B, nc, H, W] during inference/export.
+            (torch.Tensor): Logits of shape [B, nc, H/8, W/8] during training and inference,
+                or [B, nc, H/2, W/2] during export.
         """
-        feat = x[0]
         # Classify
-        logits = self.classifier(feat)  # [B, nc, H/4, W/4]
-
+        logits = self.classifier(x[0])  # [B, nc, H/8, W/8]
         if self.training:
             if self.aux_head is not None:
                 return logits, self.aux_head(x[1])  # main + aux (P4)
             return logits
         if self.export:
-            return F.interpolate(logits, scale_factor=4, mode="bilinear", align_corners=False)
+            return F.interpolate(logits, scale_factor=8, mode="bilinear", align_corners=False)
         return logits
