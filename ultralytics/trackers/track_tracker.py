@@ -413,8 +413,8 @@ class TTSTrack(BaseTrack):
 class TRACKTRACK:
     """Multi-object tracker implementing Track-Perspective Association and Track-Aware Initialization.
 
-    Detections are partitioned into high, low, and deleted (loose-NMS recovered) sets, then matched against the union
-    of tracked and lost tracks using a multi-cue cost (HMIoU + cosine ReID + confidence + angle distance) solved with
+    Detections are partitioned into high, low, and deleted (loose-NMS recovered) sets, then matched against the union of
+    tracked and lost tracks using a multi-cue cost (HMIoU + cosine ReID + confidence + angle distance) solved with
     iterative assignment. Unmatched still-Lost tracks may optionally be re-associated against leftover detections in a
     relaxed second pass, and surviving leftover detections spawn new tracks via track-aware NMS.
 
@@ -539,9 +539,7 @@ class TRACKTRACK:
             dets_high = [_new_track(b, s, c, f) for b, s, c, f in zip(high_boxes, high_scores, high_cls, features)]
         else:
             dets_high = [_new_track(b, s, c) for b, s, c in zip(high_boxes, high_scores, high_cls)]
-        dets_low = [
-            _new_track(b, s, c) for b, s, c in zip(boxes[low_mask], scores[low_mask], results.cls[low_mask])
-        ]
+        dets_low = [_new_track(b, s, c) for b, s, c in zip(boxes[low_mask], scores[low_mask], results.cls[low_mask])]
 
         dets_recovered: list[TTSTrack] = []
         if dets_del is not None:
@@ -549,9 +547,7 @@ class TRACKTRACK:
             mask = del_conf > self.det_thr
             if mask.any():
                 del_boxes = np.concatenate([del_xywh[mask], -np.ones((mask.sum(), 1))], axis=-1)
-                dets_recovered = [
-                    _new_track(b, s, c) for b, s, c in zip(del_boxes, del_conf[mask], del_cls[mask])
-                ]
+                dets_recovered = [_new_track(b, s, c) for b, s, c in zip(del_boxes, del_conf[mask], del_cls[mask])]
 
         unconfirmed, tracked = [], []
         for track in self.tracked_stracks:
@@ -611,9 +607,7 @@ class TRACKTRACK:
             unmatched_lost = [t for t in pool if t.state == TrackState.Lost and t not in lost]
             if unmatched_lost:
                 lost_cost = self._cost_matrix(unmatched_lost, leftover)
-                lost_matches, _, lost_unmatched = _iterative_associate(
-                    lost_cost, self.lost_match_thr, self.reduce_step
-                )
+                lost_matches, _, lost_unmatched = _iterative_associate(lost_cost, self.lost_match_thr, self.reduce_step)
                 for track_idx, det_idx in lost_matches:
                     unmatched_lost[track_idx].re_activate(leftover[det_idx], self.frame_id, new_id=False)
                     refind.append(unmatched_lost[track_idx])
