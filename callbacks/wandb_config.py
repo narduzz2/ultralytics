@@ -28,7 +28,9 @@ def log_config(**extra_kv):
 
     Args:
         **extra_kv: Key-value pairs to set on trainer and log. For TextClassificationTrainer, these attrs already exist;
-            for ClassificationTrainer, they're set via extra_kv.
+            for ClassificationTrainer, they're set via extra_kv. Special keys: ``wandb_group`` sets WANDB_RUN_GROUP env;
+            ``tags`` (list) sets ``wandb.run.tags`` post-init (ultralytics ``wb.init`` does not pass tags=);
+            ``notes`` (str) sets ``wandb.run.notes`` post-init similarly.
     """
     # Set group at creation time so DDP subprocesses inherit it via env
     if "wandb_group" in extra_kv:
@@ -40,6 +42,8 @@ def log_config(**extra_kv):
                 setattr(trainer, k, v)
         config = {k: getattr(trainer, k) for k in EXTRA_ATTRS if hasattr(trainer, k)}
         config.update(extra_kv)
+        tags = config.pop("tags", None)
+        notes = config.pop("notes", None)
         # Update args.yaml
         args_path = Path(trainer.save_dir) / "args.yaml"
         if args_path.exists() and config:
@@ -51,8 +55,13 @@ def log_config(**extra_kv):
             import wandb
 
             config.pop("wandb_group", None)
-            if wandb.run and config:
-                wandb.run.config.update(config, allow_val_change=True)
+            if wandb.run:
+                if config:
+                    wandb.run.config.update(config, allow_val_change=True)
+                if tags:
+                    wandb.run.tags = tuple(tags)
+                if notes:
+                    wandb.run.notes = notes
         except ImportError:
             pass
 

@@ -18,6 +18,12 @@ Flags:
         runner is single-GPU and there is no canonical batch to scale against).
     --batch <int>: override per-GPU batch (default 256). nbs stays at 256.
     --epochs <int>: override epoch budget (default 114).
+    --tags <csv>: override wandb tags (comma-separated). Defaults derived from
+        model_yaml: imagenet-pretrain, ce-baseline-114ep, exp5b-recipe,
+        yolo26-{conv|fastvit}, scale-{s|l}.
+    --notes <str>: override wandb run notes (markdown string). Defaults to a
+        per-arch summary of recipe, reference top-1, single-gpu constraint,
+        and data path.
 
 Single-GPU only: muon_w + wandb_config callbacks are registered via
 model.add_callback() and silently no-op under DDP respawn (utils/dist.py:79
@@ -59,8 +65,7 @@ def main(argv: list[str]) -> None:
     """Launch a fresh CE-on-ImageNet 114ep run or resume from a checkpoint.
 
     Args:
-        argv: [gpu, model_yaml, name]
-        --resume <path>, --data <path>, --lr <float>, --batch <int>, --epochs <int>
+        argv: [gpu, model_yaml, name] --resume <path>, --data <path>, --lr <float>, --batch <int>, --epochs <int>
     """
     args = argv[1:]
     args, resume = _pop_flag(args, "--resume")
@@ -68,6 +73,8 @@ def main(argv: list[str]) -> None:
     args, lr_override = _pop_flag(args, "--lr")
     args, batch_override = _pop_flag(args, "--batch")
     args, epochs_override = _pop_flag(args, "--epochs")
+    args, tags_override = _pop_flag(args, "--tags")
+    args, notes_override = _pop_flag(args, "--notes")
 
     if resume:
         resume = paths.patch_resume(resume)
@@ -88,6 +95,23 @@ def main(argv: list[str]) -> None:
     batch = int(batch_override) if batch_override else 256
     epochs = int(epochs_override) if epochs_override else resume_args.get("epochs", 114)
 
+    arch = "fastvit" if "fastvit" in model_yaml else "conv"
+    scale = "l" if "yolo26l" in model_yaml else "s"
+    default_tags = ["imagenet-pretrain", "ce-baseline-114ep", "exp5b-recipe", f"yolo26-{arch}", f"scale-{scale}"]
+    default_notes = (
+        "**Goal:** arch-matched ImageNet CE pretrain weights for downstream det/pose/seg finetune comparisons.\n\n"
+        "**Recipe:** byte-exact match to exp5b-ce-baseline (200ep -> 114ep compressed for phase-1 epoch budget alignment).\n"
+        "- Optimizer: MuSGD lr=0.1 wd=0.0001 muon_w=0.1 cos_lr nbs=256\n"
+        "- No warmup, mosaic=1, auto_augment=randaugment, erasing=0.4, hsv (0.015, 0.4, 0.4), fliplr=0.5\n"
+        "- imgsz=224, batch=256, workers=2\n\n"
+        "**Reference:** exp5b-ce-baseline 75.950% top-1 @ ep163 (200ep, conv-s).\n\n"
+        "**Hardware:** ultra4 single-GPU (DDP-unsafe due to model.add_callback registrations; see utils/dist.py:79).\n\n"
+        f"**Data:** {data} (local NVMe copy if /data/datasets/, else NFS).\n"
+        f"**Model:** {model_yaml} (arch={arch}, scale={scale}).\n"
+    )
+    tags = [t.strip() for t in tags_override.split(",") if t.strip()] if tags_override else default_tags
+    notes = notes_override or default_notes
+
     model = YOLO(model_yaml)
     model.add_callback("on_train_start", muon_w.override(0.1))
     model.add_callback(
@@ -97,6 +121,8 @@ def main(argv: list[str]) -> None:
             recipe="exp5b-114ep",
             muon_w=0.1,
             wandb_group="ce-pretrain-imagenet",
+            tags=tags,
+            notes=notes,
         ),
     )
     train_args = dict(
