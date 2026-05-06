@@ -11,7 +11,7 @@ from .oc_sort import OCSORT, OCSortTrack
 from .utils import matching
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYAH
-from .utils.reid import ReID
+from .utils.reid import build_encoder
 
 
 class DeepOCSortTrack(OCSortTrack):
@@ -190,16 +190,8 @@ class DeepOCSORT(OCSORT):
         self.appearance_thresh = getattr(args, "appearance_thresh", 0.75)
         self.alpha_fixed_emb = getattr(args, "alpha_fixed_emb", 0.95)
 
-        # ReID encoder
         self.with_reid = getattr(args, "with_reid", False)
-        if self.with_reid:
-            model = getattr(args, "model", "auto")
-            if model == "auto":
-                self.encoder = lambda feats, s: [f.cpu().numpy() for f in feats]
-            else:
-                self.encoder = ReID(model)
-        else:
-            self.encoder = None
+        self.encoder = build_encoder(self.with_reid, getattr(args, "model", "auto"))
 
     def init_track(self, results, img: np.ndarray | None = None) -> list[DeepOCSortTrack]:
         """Build :class:`DeepOCSortTrack` instances, attaching ReID features when enabled.
@@ -266,12 +258,7 @@ class DeepOCSORT(OCSORT):
         DeepOCSortTrack.multi_gmc(unconfirmed, warp)
 
     def _fuse_appearance(self, dists, tracks, detections, iou_dists=None):
-        """Min-fuse appearance distance into the cost (BoT-SORT-style; see note below).
-
-        Paper-fidelity: Deep OC-SORT §3.3 specifies an additive, per-pair weighted appearance
-        term. We A/B-tested both on three videos without ground truth and saw essentially
-        identical ID-stability proxies, so the simpler `min` form is kept here.
-        """
+        """Min-fuse appearance distance into the motion cost (BoT-SORT-style)."""
         if not (self.with_reid and self.encoder is not None) or not tracks or not detections:
             return dists
         emb_dists = matching.embedding_distance(tracks, detections) / 2.0
