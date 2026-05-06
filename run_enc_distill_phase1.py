@@ -75,6 +75,29 @@ RECIPES = {
         gaussian_blur=0.5,
         solarize=0.2,
     ),
+    # dinov3 photometric augs + radio-style constant wd. Addresses dinov3 backbone
+    # weight magnitude collapse (memory project_dinov3_weight_collapse): dinov3 wd
+    # 0.04->0.2 schedule drove 7x layer-0 L2 shrink vs radio at matched 7-src recipe,
+    # breaking phase-2 det (P=R=mAP=0). Lowers wd to 0.02 + drops the schedule (wd_end
+    # omitted) so weight magnitudes track the radio sibling while keeping the dinov3
+    # photometric augs that won kNN +0.9pp at the same config.
+    "dinov3_lowwd": dict(
+        lr0=2e-4,
+        weight_decay=0.02,
+        warmup_epochs=1,
+        epochs=114,
+        momentum=0.9,
+        grad_clip=3.0,
+        beta2=None,
+        auto_augment=None,
+        erasing=0.0,
+        hsv_h=0.1,
+        hsv_s=0.2,
+        hsv_v=0.4,
+        grayscale=0.2,
+        gaussian_blur=0.5,
+        solarize=0.2,
+    ),
 }
 
 # Reference global step-batch the recipes' lr0 and warmup_epochs are tuned for. When
