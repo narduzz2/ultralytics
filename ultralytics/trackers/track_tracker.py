@@ -479,16 +479,10 @@ class TRACKTRACK:
         self._gmc_warp = np.eye(2, 3, dtype=np.float64)
         self._gmc_counter = 0
 
-        self.with_reid = get("with_reid", False)
-        self.encoder = None
-        if self.with_reid:
-            model = get("model", "auto")
-            if model == "auto":
-                self.encoder = lambda feats, _: [f.cpu().numpy() for f in feats]
-            else:
-                from .utils.reid import ReID
+        from .utils.reid import build_encoder
 
-                self.encoder = ReID(model)
+        self.with_reid = get("with_reid", False)
+        self.encoder = build_encoder(self.with_reid, get("model", "auto"))
 
     def _cost_matrix(self, tracks: list[TTSTrack], dets: list[TTSTrack]) -> np.ndarray:
         """Return the multi-cue cost matrix (HMIoU + ReID + confidence + angle), gated by IoU support."""
