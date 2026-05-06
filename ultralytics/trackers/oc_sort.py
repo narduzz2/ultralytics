@@ -135,16 +135,7 @@ class OCSortTrack(STrack):
         return (direction / norm).astype(np.float32)
 
     def apply_oru(self, new_observation_xyxy: np.ndarray, current_frame_id: int) -> None:
-        """Apply Observation-Centric Re-Update: replay Kalman updates with virtual observations.
-
-        Repairs the Kalman state after an occlusion gap by linearly interpolating between the
-        last real observation and the new detection, then replaying predict-update cycles for
-        each missed frame.
-
-        Args:
-            new_observation_xyxy (np.ndarray): New detection in xyxy format.
-            current_frame_id (int): Current frame id.
-        """
+        """Repair Kalman state across an occlusion gap by replaying predict-updates on virtual observations."""
         if self._saved_mean is None or not self.observations:
             return
 
@@ -235,24 +226,7 @@ class OCSORT(BYTETracker):
         return self._fuse_appearance(dists, tracks, detections, iou_dists=iou_dists)
 
     def update(self, results, img: np.ndarray | None = None, feats: np.ndarray | None = None) -> np.ndarray:
-        """Advance the tracker by one frame and return the currently active tracks.
-
-        Pipeline: BYTE high-score association with IoU+OCM cost, OCR re-association on remaining
-        tracks using the last-observation positions, optional ByteTrack low-conf second pass,
-        unconfirmed-track handling, and new-track init. Each lost-then-rematched track has its
-        Kalman state repaired by :meth:`OCSortTrack.apply_oru` before re-activation.
-
-        Args:
-            results (Any): `Results`-like object exposing `xywh` (or `xywhr`), `conf`, and `cls`, and supporting boolean
-                / ndarray indexing.
-            img (np.ndarray | None): Current frame. Unused by OC-SORT.
-            feats (np.ndarray | None): Optional per-detection appearance features. Unused by OC-SORT; accepted for
-                signature compatibility.
-
-        Returns:
-            (np.ndarray): Float32 array with one row per activated track of the form `[..., track_id, score, cls,
-                det_idx]`. Leading coordinates are `xyxy` for standard boxes or `xywha` for oriented boxes.
-        """
+        """Advance the tracker by one frame and return active tracks as `[..., id, score, cls, det_idx]` rows."""
         self.frame_id += 1
         activated_stracks = []
         refind_stracks = []
