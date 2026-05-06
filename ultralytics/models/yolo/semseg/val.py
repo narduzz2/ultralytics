@@ -77,9 +77,9 @@ class SemanticSegmentationValidator(BaseValidator):
         Returns:
             (dict): Preprocessed batch.
         """
-        batch["img"] = batch["img"].to(self.device, non_blocking=True)
+        batch["img"] = batch["img"].to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
-        batch["semantic_mask"] = batch["semantic_mask"].to(self.device, non_blocking=True).long()
+        batch["semantic_mask"] = batch["semantic_mask"].to(self.device, non_blocking=self.device.type == "cuda").long()
         self._semantic_target_shape = tuple(batch["semantic_mask"].shape[-2:])
         return batch
 
