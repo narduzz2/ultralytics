@@ -634,6 +634,11 @@ class Mosaic(BaseMixTransform):
             >>> result = mosaic._mosaic4(labels)
             >>> assert result["img"].shape == (1280, 1280, 3)
         """
+        if labels.get("semantic_mask") is not None or any(
+            m.get("semantic_mask") is not None for m in labels.get("mix_labels", [])
+        ):
+            raise NotImplementedError("Mosaic4 does not yet support semantic masks.")
+
         mosaic_labels = []
         s = self.imgsz
         yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.border)  # mosaic center x, y
@@ -736,8 +741,6 @@ class Mosaic(BaseMixTransform):
         final_labels = self._cat_labels(mosaic_labels)
 
         final_labels["img"] = img9[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
-        if has_sem_mask:
-            final_labels["semantic_mask"] = mask9[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
         return final_labels
 
     @staticmethod
@@ -1495,29 +1498,6 @@ class SemsegRandomCrop:
         return labels
 
 
-def rescale_size(old_size, size_range):
-    h, w = old_size
-    max_long_edge = max(size_range)
-    max_short_edge = min(size_range)
-    if max_long_edge / max(h, w) <= max_short_edge / min(h, w):
-        scale_factor = max_long_edge / max(h, w)
-        if h >= w:
-            new_h = max_long_edge
-            new_w = int(w * float(scale_factor) + 0.5)
-        else:
-            new_w = max_long_edge
-            new_h = int(h * float(scale_factor) + 0.5)
-    else:
-        scale_factor = max_short_edge / min(h, w)
-        if h >= w:
-            new_w = max_short_edge
-            new_h = int(h * float(scale_factor) + 0.5)
-        else:
-            new_h = max_short_edge
-            new_w = int(w * float(scale_factor) + 0.5)
-    return new_w, new_h
-
-
 class RandomFlip:
     """Apply a random horizontal or vertical flip to an image with a given probability.
 
@@ -1595,14 +1575,14 @@ class RandomFlip:
             instances.flipud(h)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
-            if "semantic_mask" in labels:
+            if labels.get("semantic_mask") is not None:
                 labels["semantic_mask"] = np.ascontiguousarray(np.flipud(labels["semantic_mask"]))
         if self.direction == "horizontal" and random.random() < self.p:
             img = np.fliplr(img)
             instances.fliplr(w)
             if self.flip_idx is not None and instances.keypoints is not None:
                 instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
-            if "semantic_mask" in labels:
+            if labels.get("semantic_mask") is not None:
                 labels["semantic_mask"] = np.ascontiguousarray(np.fliplr(labels["semantic_mask"]))
         labels["img"] = np.ascontiguousarray(img)
         labels["instances"] = instances
