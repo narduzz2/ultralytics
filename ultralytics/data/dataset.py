@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections import defaultdict
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
@@ -33,6 +32,7 @@ from .augment import (
     SemsegRandomScale,
     SemsegRandomCrop,
     PhotoMetricDistortion,
+    SemanticFormat,
 )
 from .base import BaseDataset
 from .converter import merge_multi_segment
@@ -1052,53 +1052,6 @@ class PolygonSemsegDataset(YOLODataset):
             mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
         label["semantic_mask"] = mask
         return label
-
-
-class SemanticFormat:
-    """Format transform for semantic segmentation that converts images and masks to tensors.
-
-    This transform handles the letterboxed semantic mask by resizing it to match the image dimensions
-    and converts both to the appropriate tensor formats.
-    """
-
-    def __call__(self, labels):
-        """Apply formatting to semantic segmentation labels.
-
-        Args:
-            labels (dict): Dictionary with 'img' (np.ndarray) and 'semantic_mask' (np.ndarray).
-
-        Returns:
-            (dict): Dictionary with 'img' as CHW float32 tensor and 'semantic_mask' as int64 tensor.
-        """
-        img = labels.get("img")
-        mask = labels.get("semantic_mask")
-
-        if img is not None:
-            if img.ndim == 2:  # grayscale dropped to 2D by upstream cv2 ops (resize/flip/copyMakeBorder)
-                img = img[..., None]
-            h, w = img.shape[:2]
-
-            # Resize mask to match letterboxed image dimensions
-            if mask is not None and (mask.shape[0] != h or mask.shape[1] != w):
-                mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
-
-            # Convert image: HWC -> CHW, BGR -> RGB (only for 3-channel), uint8 -> float32
-            img = img.transpose(2, 0, 1)
-            img = np.ascontiguousarray(img[::-1] if img.shape[0] == 3 else img)
-            labels["img"] = torch.from_numpy(img).float()
-        else:
-            labels["img"] = torch.zeros(3, 640, 640)
-
-        if mask is not None:
-            labels["semantic_mask"] = torch.from_numpy(mask.copy()).long()
-        else:
-            labels["semantic_mask"] = torch.full(labels["img"].shape[-2:], 255, dtype=torch.long)
-
-        # Remove keys not needed downstream
-        for k in ("instances", "cls", "resized_shape", "ori_shape", "ratio_pad"):
-            labels.pop(k, None)
-
-        return labels
 
 
 class ClassificationDataset:

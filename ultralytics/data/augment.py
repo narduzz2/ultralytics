@@ -2420,6 +2420,34 @@ class Format:
         return masks, instances, cls
 
 
+class SemanticFormat(Format):
+    """Format transform for semantic segmentation that converts images and masks to tensors.
+
+    This transform handles the letterboxed semantic mask by resizing it to match the image dimensions
+    and converts both to the appropriate tensor formats.
+    """
+
+    def __call__(self, labels):
+        """Apply formatting to semantic segmentation labels.
+
+        Args:
+            labels (dict): Dictionary with 'img' (np.ndarray) and 'semantic_mask' (np.ndarray).
+
+        Returns:
+            (dict): Dictionary with 'img' as CHW float32 tensor and 'semantic_mask' as int64 tensor.
+        """
+        img = self._format_img(labels.get("img"))
+        mask = labels.get("semantic_mask")
+        labels["img"] = img
+        labels["semantic_mask"] = torch.from_numpy(mask.copy()).long()
+
+        # Remove keys not needed downstream
+        for k in ("instances", "cls", "resized_shape", "ori_shape", "ratio_pad"):
+            labels.pop(k, None)
+
+        return labels
+
+
 class LoadVisualPrompt:
     """Create visual prompts from bounding boxes or masks for model input."""
 
