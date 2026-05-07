@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from ultralytics.utils import LOGGER, DataExportMixin, SimpleClass, TryExcept, checks, plt_settings
+from ultralytics.utils.plotting import colors
 
 OKS_SIGMA = (
     np.array(
@@ -22,7 +23,29 @@ OKS_SIGMA = (
     / 10.0
 )
 RLE_WEIGHT = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.2, 1.5, 1.5, 1.0, 1.0, 1.2, 1.2, 1.5, 1.5])
-CITYSCAPES_WEIGHT = np.array([0.8373, 0.918, 0.866, 1.0345, 1.0166, 0.9969, 0.9754, 1.0489, 0.8786, 1.0023, 0.9539, 0.9843, 1.1116, 0.9037, 1.0865, 1.0955, 1.0865, 1.1529, 1.0507])
+CITYSCAPES_WEIGHT = np.array(
+    [
+        0.8373,
+        0.918,
+        0.866,
+        1.0345,
+        1.0166,
+        0.9969,
+        0.9754,
+        1.0489,
+        0.8786,
+        1.0023,
+        0.9539,
+        0.9843,
+        1.1116,
+        0.9037,
+        1.0865,
+        1.0955,
+        1.0865,
+        1.1529,
+        1.0507,
+    ]
+)
 
 
 def bbox_ioa(box1: np.ndarray, box2: np.ndarray, iou: bool = False, eps: float = 1e-7) -> np.ndarray:
@@ -1623,58 +1646,22 @@ class OBBMetrics(DetMetrics):
         DetMetrics.__init__(self, names)
 
 
-class SemsegConfusionMatrix(DataExportMixin):
-    """Confusion matrix wrapper for semantic segmentation, exposing export methods via DataExportMixin.
-
-    Attributes:
-        matrix (torch.Tensor | None): Accumulated confusion matrix of shape (cm_nc, cm_nc).
-        names (dict[int, str]): Class names mapping.
-        nc (int): Number of classes.
-        cm_nc (int): Confusion matrix side length (2 for binary segmentation, else nc).
-        task (str): Task type identifier, fixed to "semseg".
-    """
-
-    def __init__(self, names: dict | None = None):
-        """Initialize the wrapper.
-
-        Args:
-            names (dict, optional): Dictionary mapping class indices to names.
-        """
-        self.names = names or {}
-        self.nc = len(self.names)
-        self.cm_nc = 2 if self.nc == 1 else self.nc
-        self.matrix: torch.Tensor | None = None
-        self.task = "semseg"
-
-    def summary(self, normalize: bool = False, decimals: int = 5) -> list[dict[str, float]]:
-        """Return the confusion matrix as a list of per-row dictionaries (predicted x actual)."""
-        if self.matrix is None:
-            return []
-        names = list(self.names.values()) if self.nc != 1 else ["background", next(iter(self.names.values()), "1")]
-        if len(names) < self.cm_nc:
-            names = names + [str(i) for i in range(len(names), self.cm_nc)]
-        # Internal layout is matrix[gt, pred] (see SemsegMetrics.process); transpose so row index matches "Predicted".
-        array = self.matrix.detach().cpu().numpy().astype(float).T
-        if normalize:
-            array = array / (array.sum(axis=0, keepdims=True) + 1e-9)
-        array = array.round(decimals)
-        return [
-            dict({"Predicted": names[i]}, **{names[j]: float(array[i, j]) for j in range(self.cm_nc)})
-            for i in range(self.cm_nc)
-        ]
-
-
 class SemsegMetrics(SimpleClass, DataExportMixin):
     """Metrics for semantic segmentation: mIoU, pixel accuracy, per-class IoU.
 
     Attributes:
         names (dict): Class names mapping.
         nc (int): Number of classes.
+        cm_nc (int): Confusion matrix side length (2 for binary segmentation, else nc).
         device (torch.device | None): Device used for confusion matrix accumulation.
-        ignore_index (int): Label value to ignore during metric accumulation.
-        confusion_matrix (SemsegConfusionMatrix): Confusion matrix wrapper with export methods.
+        matrix (torch.Tensor | None): Accumulated confusion matrix of shape (cm_nc, cm_nc).
         speed (dict): Processing speed statistics.
-        task (str): Task type identifier.
+        nt_per_image (np.ndarray): Number of images containing each class.
+        nt_per_class (np.ndarray): Number of pixels per class.
+        _miou (float): Cached mean IoU.
+        _pixel_accuracy (float): Cached pixel accuracy.
+        _per_class_iou (np.ndarray): Cached per-class IoU values.
+        _per_class_pixel_acc (np.ndarray): Cached per-class pixel accuracy.
     """
 
     def __init__(self, names=None, device=None):
@@ -1688,10 +1675,16 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         self.nc = len(self.names)
         self.cm_nc = 2 if self.nc == 1 else self.nc
         self.device = torch.device(device) if device is not None else None
-        self.confusion_matrix = SemsegConfusionMatrix(names=self.names)
+        self.matrix = None
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+        self.nt_per_image = np.zeros(self.nc, dtype=np.int64)
+        self._miou = 0.0
+        self._pixel_accuracy = 0.0
+        self._per_class_iou = np.zeros(self.nc, dtype=np.float64)
+        self._per_class_pixel_acc = np.zeros(self.nc, dtype=np.float64)
+        self.nt_per_class = np.zeros(self.nc, dtype=np.int64)
 
-    def process(self, preds, targets):
+    def update_stats(self, preds, targets):
         """Accumulate confusion matrix from predictions and targets.
 
         Args:
@@ -1706,65 +1699,179 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         if not isinstance(targets, torch.Tensor):
             targets = torch.as_tensor(targets, device=self.device)
 
-        cm = self.confusion_matrix.matrix
-        metric_device = cm.device if cm is not None else (self.device or preds.device)
+        metric_device = self.device or preds.device
         self.device = metric_device
         preds = preds.to(metric_device, non_blocking=True).long()
         targets = targets.to(metric_device, non_blocking=True).long()
-        if cm is None:
-            cm = torch.zeros((self.cm_nc, self.cm_nc), device=metric_device, dtype=torch.int64)
-            self.confusion_matrix.matrix = cm
+        if self.matrix is None:
+            self.matrix = torch.zeros((self.cm_nc, self.cm_nc), device=metric_device, dtype=torch.int64)
 
-        valid = (
-            (targets != 255)
-            & (preds >= 0)
-            & (preds < self.cm_nc)
-            & (targets >= 0)
-            & (targets < self.cm_nc)
+        valid = (targets != 255) & (preds >= 0) & (preds < self.cm_nc) & (targets >= 0) & (targets < self.cm_nc)
+        hist = torch.bincount(self.cm_nc * targets[valid] + preds[valid], minlength=self.cm_nc**2).reshape(
+            self.cm_nc, self.cm_nc
         )
-        hist = torch.bincount(
-            self.cm_nc * targets[valid] + preds[valid], minlength=self.cm_nc**2
-        ).reshape(self.cm_nc, self.cm_nc)
-        cm += hist.to(cm.dtype)
+        self.matrix += hist.to(self.matrix.dtype)
 
-    def _compute_iou(self) -> torch.Tensor | None:
-        """Compute per-class IoU tensor on the confusion matrix device."""
-        cm = self.confusion_matrix.matrix
-        if cm is None:
-            return None
-        confusion_matrix = cm.to(torch.float64)
-        intersection = torch.diagonal(confusion_matrix)
-        union = confusion_matrix.sum(1) + confusion_matrix.sum(0) - intersection
-        return intersection / (union + 1e-10)
+        # Track per-image class presence
+        for b in range(targets.shape[0]):
+            valid_b = valid[b]
+            if valid_b.any():
+                classes = torch.unique(targets[b][valid_b]).cpu().numpy()
+                for c in classes:
+                    if self.nc == 1 and c == 1:
+                        self.nt_per_image[0] += 1
+                    elif 0 <= c < self.nc:
+                        self.nt_per_image[c] += 1
+
+    def process(self, save_dir=Path("."), plot=False, on_plot=None):
+        """Compute final metrics from accumulated confusion matrix.
+
+        Args:
+            save_dir (Path): Directory to save plots. Defaults to Path('.').
+            plot (bool): Whether to plot IoU bars and confusion matrix. Defaults to False.
+            on_plot (callable, optional): Function to call after plots are generated. Defaults to None.
+        """
+        if self.matrix is None:
+            self._miou = 0.0
+            self._pixel_accuracy = 0.0
+            self._per_class_iou = np.zeros(self.nc, dtype=np.float64)
+            self._per_class_pixel_acc = np.zeros(self.nc, dtype=np.float64)
+            self.nt_per_class = np.zeros(self.nc, dtype=np.int64)
+            return
+
+        cm = self.matrix.to(torch.float64)
+        intersection = torch.diagonal(cm)
+        union = cm.sum(1) + cm.sum(0) - intersection
+        iou = intersection / (union + 1e-10)
+        row_sum = cm.sum(1)
+        pa = intersection / (row_sum + 1e-10)
+
+        if self.nc == 1:
+            self._miou = float(iou[1].item())
+            self._per_class_iou = iou[1:].cpu().numpy()
+            self._per_class_pixel_acc = pa[1:].cpu().numpy()
+            self.nt_per_class = np.array([row_sum[1].item()], dtype=np.int64)
+        else:
+            self._miou = float(torch.nanmean(iou).item())
+            self._per_class_iou = iou.cpu().numpy()
+            self._per_class_pixel_acc = pa.cpu().numpy()
+            self.nt_per_class = row_sum[: self.nc].cpu().numpy().astype(np.int64)
+
+        self._pixel_accuracy = float((intersection.sum() / (cm.sum() + 1e-10)).item())
+
+        if plot:
+            self._plot_iou_bars(save_dir, on_plot)
+            self._plot_confusion_matrix(save_dir, on_plot)
+
+    def clear_stats(self):
+        """Clear accumulated statistics."""
+        self.matrix = None
+        self.nt_per_image.fill(0)
+
+    @plt_settings()
+    def _plot_iou_bars(self, save_dir, on_plot):
+        """Plot per-class IoU bar chart.
+
+        Args:
+            save_dir (Path | str): Directory to save the plot.
+            on_plot (callable, optional): Function to call after plot is saved.
+        """
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6), tight_layout=True)
+        names = list(self.names.values()) if self.names else [str(i) for i in range(self.nc)]
+        x = np.arange(self.nc)
+        bars = ax.bar(x, self._per_class_iou, color=[list(c / 255.0 for c in colors(i, False)) for i in range(self.nc)])
+        ax.set_xlabel("Class")
+        ax.set_ylabel("IoU")
+        ax.set_title("Per-Class IoU")
+        ax.set_ylim(0, 1)
+        if 0 < len(names) < 30:
+            ax.set_xticks(x)
+            ax.set_xticklabels(names, rotation=90, fontsize=10)
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2.0, height, f"{height:.3f}", ha="center", va="bottom", fontsize=8)
+        fname = Path(save_dir) / "iou_bar_chart.png"
+        plt.savefig(fname, dpi=250)
+        plt.close(fig)
+        if on_plot:
+            on_plot(fname)
+
+    @plt_settings()
+    def _plot_confusion_matrix(self, save_dir, on_plot):
+        """Plot confusion matrix heatmap (normalized and raw).
+
+        Args:
+            save_dir (Path | str): Directory to save the plots.
+            on_plot (callable, optional): Function to call after plots are saved.
+        """
+        import matplotlib.pyplot as plt
+
+        cm = self.matrix.cpu().numpy().astype(np.float64)
+        for normalize in (False, True):
+            fig, ax = plt.subplots(1, 1, figsize=(12, 9))
+            array = cm.copy()
+            if normalize:
+                array = array / (array.sum(axis=0, keepdims=True) + 1e-9)
+            array[array < 0.005] = np.nan
+            names = list(self.names.values()) if self.nc != 1 else ["background", next(iter(self.names.values()), "1")]
+            if len(names) < self.cm_nc:
+                names = names + [str(i) for i in range(len(names), self.cm_nc)]
+            im = ax.imshow(array, cmap="Blues", vmin=0.0, interpolation="none")
+            ax.set_xlabel("Predicted")
+            ax.set_ylabel("Ground Truth")
+            title = "Confusion Matrix" + (" Normalized" if normalize else "")
+            ax.set_title(title)
+            ticklabels = names if self.cm_nc < 99 else "auto"
+            if ticklabels != "auto":
+                ticks = np.arange(len(ticklabels))
+                ax.set_xticks(ticks)
+                ax.set_yticks(ticks)
+                ax.set_xticklabels(ticklabels, rotation=90, fontsize=max(6, 12 - 0.1 * self.cm_nc))
+                ax.set_yticklabels(ticklabels, fontsize=max(6, 12 - 0.1 * self.cm_nc))
+            if self.cm_nc < 30:
+                color_threshold = 0.45 * (1 if normalize else np.nanmax(array))
+                for i in range(self.cm_nc):
+                    for j in range(self.cm_nc):
+                        val = array[i, j]
+                        if np.isnan(val):
+                            continue
+                        ax.text(
+                            j,
+                            i,
+                            f"{val:.2f}" if normalize else f"{int(val)}",
+                            ha="center",
+                            va="center",
+                            fontsize=10,
+                            color="white" if val > color_threshold else "black",
+                        )
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.05)
+            fname = Path(save_dir) / f"confusion_matrix{'_normalized' if normalize else ''}.png"
+            plt.savefig(fname, dpi=250)
+            plt.close(fig)
+            if on_plot:
+                on_plot(fname)
 
     @property
     def miou(self):
-        """Compute mean IoU (foreground IoU only for binary segmentation)."""
-        iou = self._compute_iou()
-        if iou is None:
-            return 0.0
-        if self.nc == 1:
-            return float(iou[1].item())
-        return float(torch.nanmean(iou).item())
+        """Return mean IoU (foreground IoU only for binary segmentation)."""
+        return self._miou
 
     @property
     def pixel_accuracy(self):
-        """Compute overall pixel accuracy."""
-        cm = self.confusion_matrix.matrix
-        if cm is None:
-            return 0.0
-        confusion_matrix = cm.to(torch.float64)
-        return float((torch.diagonal(confusion_matrix).sum() / (confusion_matrix.sum() + 1e-10)).item())
+        """Return overall pixel accuracy."""
+        return self._pixel_accuracy
 
     @property
     def per_class_iou(self):
-        """Compute per-class IoU values (foreground IoU only for binary segmentation)."""
-        iou = self._compute_iou()
-        if iou is None:
-            return np.zeros(self.nc, dtype=np.float64)
-        if self.nc == 1:
-            return iou[1:].cpu().numpy()
-        return iou.cpu().numpy()
+        """Return per-class IoU values (foreground IoU only for binary segmentation)."""
+        return self._per_class_iou
+
+    @property
+    def per_class_pixel_accuracy(self):
+        """Return per-class pixel accuracy (diagonal / row sum for each class)."""
+        return self._per_class_pixel_acc
 
     @property
     def fitness(self):
@@ -1779,6 +1886,24 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
     def mean_results(self):
         """Return mean results for logging."""
         return [self.miou, self.pixel_accuracy]
+
+    def class_result(self, i):
+        """Return the result of evaluating the performance on a specific class.
+
+        Args:
+            i (int): Class index.
+
+        Returns:
+            (list): [IoU, pixel_accuracy] for the specified class.
+        """
+        if self._per_class_iou is None or len(self._per_class_iou) == 0:
+            return [0.0, 0.0]
+        return [float(self._per_class_iou[i]), float(self._per_class_pixel_acc[i])]
+
+    @property
+    def ap_class_index(self):
+        """Return the class index list for per-class results."""
+        return list(range(self.nc))
 
     @property
     def results_dict(self):
@@ -1795,7 +1920,7 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         """Return empty list (no PR curve results)."""
         return []
 
-    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict[str, Any]]:
+    def summary(self, normalize=True, decimals=5):
         """Generate a per-class summary of semantic segmentation metrics, with global mIoU and pixel accuracy on each row.
 
         Args:
@@ -1812,6 +1937,8 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         return [
             {
                 "Class": names.get(i, str(i)),
+                "Images": int(self.nt_per_image[i]),
+                "Instances": int(self.nt_per_class[i]),
                 "IoU": round(float(per_class[i]), decimals),
                 "mIoU": miou,
                 "pixel_acc": pixel_acc,
