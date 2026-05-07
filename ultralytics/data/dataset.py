@@ -735,6 +735,7 @@ class SemsegDataset(BaseDataset):
             normalized[src] = dst
         return normalized
 
+    # TODO
     def _get_mask_dir(self) -> Path:
         """Build mask directory by replacing `images` path component with configured masks dir."""
         masks_dir_name = self.data.get("masks_dir", "masks")
@@ -830,7 +831,8 @@ class SemsegDataset(BaseDataset):
         """
         mask_dir = self._get_mask_dir()
         cache_path = mask_dir.with_suffix(".cache")
-        mask_files = [self._resolve_mask_file(im_file, mask_dir) for im_file in self.im_files]
+        mask_files = img2label_paths(self.im_files, label_dir=self.data.get("masks_dir", "masks"), suffix=".png")
+        # mask_files = [self._resolve_mask_file(im_file, mask_dir) for im_file in self.im_files]
 
         try:
             cache, exists = load_dataset_cache_file(cache_path), True
