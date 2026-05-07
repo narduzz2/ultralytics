@@ -841,7 +841,6 @@ class SemsegDataset(BaseDataset):
         from ultralytics.utils.instance import Instances
 
         bboxes = label.pop("bboxes", np.zeros((0, 4), dtype=np.float32))
-        label.pop("segments", None)
         label["instances"] = Instances(
             bboxes, segments=np.zeros((0, 0, 2), dtype=np.float32), bbox_format="xywh", normalized=True
         )
