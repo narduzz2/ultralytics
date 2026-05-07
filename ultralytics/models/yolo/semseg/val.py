@@ -215,6 +215,7 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         self.data = add_polygon_background(self.data)
         use_rect = mode == "val"
+        # TODO
         dataset_cls = SemsegDataset if self.data.get("masks_dir") else PolygonSemsegDataset
         return dataset_cls(
             img_path=img_path,

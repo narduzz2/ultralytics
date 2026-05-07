@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import math
 import os
 from collections import defaultdict
 from itertools import repeat
@@ -20,7 +19,6 @@ from torch.utils.data import ConcatDataset
 from ultralytics.utils import LOCAL_RANK, LOGGER, NUM_THREADS, TQDM, colorstr
 from ultralytics.utils.instance import Instances
 from ultralytics.utils.ops import resample_segments, segments2boxes
-from ultralytics.utils.patches import imread
 from ultralytics.utils.torch_utils import TORCHVISION_0_18
 
 from .augment import (
@@ -987,7 +985,7 @@ def add_polygon_background(data: dict) -> dict:
     return data
 
 
-class PolygonSemsegDataset(SemsegDataset):
+class PolygonSemsegDataset(YOLODataset):
     """Semantic segmentation dataset that rasterizes YOLO polygon labels into masks on the fly.
 
     Used when the dataset YAML lacks 'masks_dir'. Pixels not covered by any polygon become a
@@ -1006,93 +1004,31 @@ class PolygonSemsegDataset(SemsegDataset):
         """
         nc = (data or {}).get("nc") or len((data or {}).get("names", {}))
         self.bg_class_idx = max(int(nc) - 1, 0)
+        self.ignore_label = 255
         super().__init__(*args, data=data, **kwargs)
 
-    def cache_labels(self, path: Path = Path("./labels.cache")) -> dict[str, Any]:
-        """Cache YOLO polygon labels for semseg-from-polygons training.
+    @staticmethod
+    def collate_fn(batch):
+        """Collate semantic segmentation batch into tensors.
 
         Args:
-            path (Path): Cache file path.
+            batch (list[dict]): List of sample dictionaries.
 
         Returns:
-            (dict[str, Any]): Cached labels and metadata.
+            (dict): Collated batch with stacked tensors.
         """
-        x = {"labels": []}
-        nm, nf, ne, nc, msgs = 0, 0, 0, 0, []
-        desc = f"{self.prefix}Scanning {path.parent / path.stem}..."
-        total = len(self.im_files)
-        # User class ids occupy [0, bg_class_idx); reject polygons that claim the reserved bg id.
-        num_cls = max(self.bg_class_idx, 1)
-        with ThreadPool(NUM_THREADS) as pool:
-            results = pool.imap(
-                func=verify_image_label,
-                iterable=zip(
-                    self.im_files,
-                    self.label_files,
-                    repeat(self.prefix),
-                    repeat(False),  # keypoint
-                    repeat(num_cls),
-                    repeat(0),  # nkpt
-                    repeat(0),  # ndim
-                    repeat(self.single_cls),
-                ),
-            )
-            pbar = TQDM(results, desc=desc, total=total)
-            for im_file, lb, shape, segments, _kpt, nm_f, nf_f, ne_f, nc_f, msg in pbar:
-                nm += nm_f
-                nf += nf_f
-                ne += ne_f
-                nc += nc_f
-                if im_file:
-                    x["labels"].append(
-                        {
-                            "im_file": im_file,
-                            "shape": shape,
-                            "cls": lb[:, 0:1],
-                            "segments": segments,
-                        }
-                    )
-                if msg:
-                    msgs.append(msg)
-                pbar.desc = f"{desc} {nf} images, {nm + ne} backgrounds, {nc} corrupt"
-            pbar.close()
-        if msgs:
-            LOGGER.info("\n".join(msgs))
-        if nf == 0:
-            LOGGER.warning(f"{self.prefix}No polygon labels found in {path}. {HELP_URL}")
-        x["hash"] = get_hash(self.label_files + self.im_files)
-        x["results"] = nf, nm, ne, nc, total
-        x["msgs"] = msgs
-        if x["labels"]:
-            save_dataset_cache_file(self.prefix, path, x, DATASET_CACHE_VERSION)
-        return x
+        return SemsegDataset.collate_fn(batch)
 
-    def get_labels(self) -> list[dict[str, Any]]:
-        """Load polygon labels (from cache or by scanning) and synthesize per-image mask cache paths."""
-        self.label_files = img2label_paths(self.im_files)
-        cache_path = Path(self.label_files[0]).parent.with_suffix(".semseg.cache")
-        try:
-            cache, exists = load_dataset_cache_file(cache_path), True
-            assert cache["version"] == DATASET_CACHE_VERSION
-            assert cache["hash"] == get_hash(self.label_files + self.im_files)
-        except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError):
-            cache, exists = self.cache_labels(cache_path), False
+    def build_transforms(self, hyp=None):
+        """Build transforms for semantic segmentation.
 
-        nf, nm, ne, nc, n = cache.pop("results")
-        if exists and LOCAL_RANK in {-1, 0}:
-            d = f"Scanning {cache_path}... {nf} images, {nm + ne} backgrounds, {nc} corrupt"
-            TQDM(None, desc=self.prefix + d, total=n, initial=n)
-            if cache["msgs"]:
-                LOGGER.info("\n".join(cache["msgs"]))
+        Args:
+            hyp (dict): Hyperparameters.
 
-        [cache.pop(k) for k in ("hash", "version", "msgs")]
-        labels = cache["labels"]
-        if not labels:
-            raise RuntimeError(f"No valid images found in {cache_path}. {HELP_URL}")
-        self.im_files = [lb["im_file"] for lb in labels]
-        # No source mask files; rasterized masks are generated on the fly from polygons.
-        self.mask_files = [""] * len(labels)
-        return labels
+        Returns:
+            (Compose): Composed transforms.
+        """
+        return SemsegDataset.build_transforms(self, hyp)
 
     def load_mask(self, index: int, image_shape: tuple[int, int] | None = None) -> np.ndarray:
         """Rasterize this image's polygons into a (H, W) uint8 semantic mask, bg = self.bg_class_idx."""
@@ -1114,11 +1050,26 @@ class PolygonSemsegDataset(SemsegDataset):
         out[fg] = cls_arr[inst[fg] - 1].astype(np.uint8)
         return out
 
-    def set_rectangle(self):
-        """Aspect-ratio batching; keep mask_files aligned with reordered im_files (no source masks)."""
-        # Skip SemsegDataset.set_rectangle (it reads "mask_file" from each label, which we don't store).
-        BaseDataset.set_rectangle(self)
-        self.mask_files = [""] * len(self.im_files)
+    def get_image_and_label(self, index):
+        """Get image, label and semantic mask for the given index.
+
+        Overrides parent to include semantic mask so that Mosaic/CopyPaste mix images
+        also have their masks loaded.
+
+        Args:
+            index (int): Dataset index.
+
+        Returns:
+            (dict): Label dict with 'img', 'semantic_mask', and metadata.
+        """
+        label = super().get_image_and_label(index)
+        h, w = label["img"].shape[:2]
+        mask = self.load_mask(index, image_shape=(h, w))
+        # Resize mask to match the resized image dimensions
+        if mask.shape[:2] != (h, w):
+            mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+        label["semantic_mask"] = mask
+        return label
 
 
 class SemanticFormat:
