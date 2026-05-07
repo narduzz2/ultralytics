@@ -7,14 +7,16 @@ from copy import copy
 import cv2
 import numpy as np
 import torch
+from PIL import Image
+import matplotlib.pyplot as plt
 
 from ultralytics.data import build_dataloader
 from ultralytics.data.dataset import PolygonSemsegDataset, SemsegDataset, add_polygon_background
 from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
-from ultralytics.utils import DEFAULT_CFG, RANK
+from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 from ultralytics.nn.tasks import SemanticSegmentationModel
-from ultralytics.utils.plotting import colors
+from ultralytics.utils.plotting import colors, plt_settings
 from ultralytics.utils.torch_utils import torch_distributed_zero_first
 
 
@@ -216,6 +218,65 @@ class SemanticSegmentationTrainer(BaseTrainer):
         if self.on_plot:
             self.on_plot(fname)
 
+    @plt_settings()
     def plot_training_labels(self):
-        """Plot training labels (not applicable for semantic segmentation)."""
-        pass
+        """Plot training labels class distribution for semantic segmentation.
+
+        Samples up to 1000 mask files from the training dataset, accumulates per-class pixel
+        counts, and plots a bar chart of class distribution saved to 'labels.jpg'.
+        """
+        LOGGER.info(f"Plotting labels to {self.save_dir / 'labels.jpg'}... ")
+        nc = self.data["nc"]
+        names = self.data["names"]
+        pixel_counts = np.zeros(nc, dtype=np.int64)
+
+        dataset = self.train_loader.dataset
+        mask_files = getattr(dataset, "mask_files", [])
+        if not mask_files:
+            LOGGER.warning("No mask files found, skipping plot_training_labels")
+            return
+
+        sample_size = min(1000, len(mask_files))
+        indices = np.linspace(0, len(mask_files) - 1, sample_size).astype(int)
+
+        for idx in indices:
+            try:
+                mask = np.array(Image.open(mask_files[idx]))
+            except Exception:
+                continue
+            if hasattr(dataset, "label_mapping") and dataset.label_mapping:
+                for old, new in dataset.label_mapping.items():
+                    mask[mask == old] = new
+            valid = (mask >= 0) & (mask < nc) & (mask != 255)
+            if valid.any():
+                classes, counts = np.unique(mask[valid], return_counts=True)
+                for c, count in zip(classes, counts):
+                    pixel_counts[int(c)] += int(count)
+
+        _, ax = plt.subplots(1, 1, figsize=(8, 6), tight_layout=True)
+        bars = ax.bar(range(nc), pixel_counts, color=[list(c / 255.0 for c in colors(i, False)) for i in range(nc)])
+        ax.set_xlabel("Class")
+        ax.set_ylabel("Pixels")
+        ax.set_title("Training Labels Class Distribution")
+        if 0 < len(names) < 30:
+            ax.set_xticks(range(len(names)))
+            ax.set_xticklabels(list(names.values()), rotation=90, fontsize=10)
+        for bar in bars:
+            height = bar.get_height()
+            if height > 0:
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    height,
+                    f"{int(height):,}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        fname = self.save_dir / "labels.jpg"
+        plt.savefig(fname, dpi=200)
+        plt.close()
+        if self.on_plot:
+            self.on_plot(fname)
