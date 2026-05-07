@@ -1664,7 +1664,7 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         _per_class_pixel_acc (np.ndarray): Cached per-class pixel accuracy.
     """
 
-    def __init__(self, names=None, device=None):
+    def __init__(self, names: dict[int, str] = None) -> None:
         """Initialize SemanticMetrics.
 
         Args:
@@ -1674,15 +1674,14 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         self.names = names or {}
         self.nc = len(self.names)
         self.cm_nc = 2 if self.nc == 1 else self.nc
-        self.device = torch.device(device) if device is not None else None
         self.matrix = None
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
-        self.nt_per_image = np.zeros(self.nc, dtype=np.int64)
+        self.nt_per_image = np.zeros(self.nc, dtype=np.int32)
         self._miou = 0.0
         self._pixel_accuracy = 0.0
-        self._per_class_iou = np.zeros(self.nc, dtype=np.float64)
-        self._per_class_pixel_acc = np.zeros(self.nc, dtype=np.float64)
-        self.nt_per_class = np.zeros(self.nc, dtype=np.int64)
+        self._per_class_iou = np.zeros(self.nc, dtype=np.float32)
+        self._per_class_pixel_acc = np.zeros(self.nc, dtype=np.float32)
+        self.nt_per_class = np.zeros(self.nc, dtype=np.int32)
 
     def update_stats(self, preds, targets):
         """Accumulate confusion matrix from predictions and targets.
@@ -1691,20 +1690,8 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
             preds (torch.Tensor | np.ndarray): Predicted class IDs [B, H, W].
             targets (torch.Tensor | np.ndarray): Ground truth class IDs [B, H, W].
         """
-        if self.nc == 0:
-            return
-
-        if not isinstance(preds, torch.Tensor):
-            preds = torch.as_tensor(preds, device=self.device)
-        if not isinstance(targets, torch.Tensor):
-            targets = torch.as_tensor(targets, device=self.device)
-
-        metric_device = self.device or preds.device
-        self.device = metric_device
-        preds = preds.to(metric_device, non_blocking=True).long()
-        targets = targets.to(metric_device, non_blocking=True).long()
         if self.matrix is None:
-            self.matrix = torch.zeros((self.cm_nc, self.cm_nc), device=metric_device, dtype=torch.int64)
+            self.matrix = torch.zeros((self.cm_nc, self.cm_nc), device=preds.device, dtype=torch.int32)
 
         valid = (targets != 255) & (preds >= 0) & (preds < self.cm_nc) & (targets >= 0) & (targets < self.cm_nc)
         hist = torch.bincount(self.cm_nc * targets[valid] + preds[valid], minlength=self.cm_nc**2).reshape(
@@ -1713,6 +1700,7 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         self.matrix += hist.to(self.matrix.dtype)
 
         # Track per-image class presence
+        # TODO
         for b in range(targets.shape[0]):
             valid_b = valid[b]
             if valid_b.any():
@@ -1732,14 +1720,9 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
             on_plot (callable, optional): Function to call after plots are generated. Defaults to None.
         """
         if self.matrix is None:
-            self._miou = 0.0
-            self._pixel_accuracy = 0.0
-            self._per_class_iou = np.zeros(self.nc, dtype=np.float64)
-            self._per_class_pixel_acc = np.zeros(self.nc, dtype=np.float64)
-            self.nt_per_class = np.zeros(self.nc, dtype=np.int64)
             return
 
-        cm = self.matrix.to(torch.float64)
+        cm = self.matrix.to(torch.float32)
         intersection = torch.diagonal(cm)
         union = cm.sum(1) + cm.sum(0) - intersection
         iou = intersection / (union + 1e-10)
@@ -1750,12 +1733,12 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
             self._miou = float(iou[1].item())
             self._per_class_iou = iou[1:].cpu().numpy()
             self._per_class_pixel_acc = pa[1:].cpu().numpy()
-            self.nt_per_class = np.array([row_sum[1].item()], dtype=np.int64)
+            self.nt_per_class = np.array([row_sum[1].item()], dtype=np.int32)
         else:
             self._miou = float(torch.nanmean(iou).item())
             self._per_class_iou = iou.cpu().numpy()
             self._per_class_pixel_acc = pa.cpu().numpy()
-            self.nt_per_class = row_sum[: self.nc].cpu().numpy().astype(np.int64)
+            self.nt_per_class = row_sum[: self.nc].cpu().numpy().astype(np.int32)
 
         self._pixel_accuracy = float((intersection.sum() / (cm.sum() + 1e-10)).item())
 
@@ -1808,7 +1791,7 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         """
         import matplotlib.pyplot as plt
 
-        cm = self.matrix.cpu().numpy().astype(np.float64)
+        cm = self.matrix.cpu().numpy().astype(np.float32)
         for normalize in (False, True):
             fig, ax = plt.subplots(1, 1, figsize=(12, 9))
             array = cm.copy()

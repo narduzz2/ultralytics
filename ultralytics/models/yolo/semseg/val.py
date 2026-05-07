@@ -46,7 +46,6 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         super().__init__(dataloader, save_dir, args, _callbacks)
         self.args.task = "semseg"
-        self.metrics = SemsegMetrics()
         self.dataset = None
         self.results_dir = None
         self.image_shapes = {}
@@ -60,7 +59,7 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         self.names = model.names
         self.nc = len(self.names)
-        self.metrics = SemsegMetrics(names=self.names, device=self.device)
+        self.metrics = SemsegMetrics(names=self.names)
         self.seen = 0
         self.dataset = getattr(self.dataloader, "dataset", None)
         labels = getattr(self.dataset, "labels", []) if self.dataset is not None else []
