@@ -1703,13 +1703,14 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         # TODO
         for b in range(targets.shape[0]):
             valid_b = valid[b]
-            if valid_b.any():
-                classes = torch.unique(targets[b][valid_b]).cpu().numpy()
-                for c in classes:
-                    if self.nc == 1 and c == 1:
-                        self.nt_per_image[0] += 1
-                    elif 0 <= c < self.nc:
-                        self.nt_per_image[c] += 1
+            if not valid_b.any():
+                continue
+            classes = torch.unique(targets[b][valid_b]).cpu().numpy()
+            for c in classes:
+                if self.nc == 1 and c == 1:
+                    self.nt_per_image[0] += 1
+                elif 0 <= c < self.nc:
+                    self.nt_per_image[c] += 1
 
     def process(self, save_dir=Path("."), plot=False, on_plot=None):
         """Compute final metrics from accumulated confusion matrix.
