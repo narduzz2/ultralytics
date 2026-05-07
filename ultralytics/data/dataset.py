@@ -1107,9 +1107,13 @@ def add_polygon_background(data: dict) -> dict:
         return data
     nc = int(data.get("nc") or len(data.get("names") or {}))
     names = dict(data.get("names") or {})
-    names[nc] = "background"
-    data["names"] = names
+    if nc == 1:  # assign background as 0, and class 0 as 1
+        names[1] = names.get(0, "class0")
+        names[0] = "background"
+    else:
+        names[nc] = "background"
     data["nc"] = nc + 1
+    data["names"] = names
     data["_polygon_bg_added"] = True
     return data
 
