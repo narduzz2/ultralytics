@@ -823,30 +823,9 @@ class SemsegDataset(BaseDataset):
         """Load an image for semantic segmentation, scaling the short side to imgsz when rect_mode=True."""
         return super().load_image(i, rect_mode=rect_mode, resize_short=True)
 
-    # TODO
     def set_rectangle(self):
         """Sort by aspect ratio and set batch shapes for short-side-scaled semantic inputs."""
-        bi = np.floor(np.arange(self.ni) / self.batch_size).astype(int)  # batch index
-        nb = bi[-1] + 1  # number of batches
-
-        s = np.array([x.pop("shape") for x in self.labels])  # hw
-        ar = s[:, 0] / s[:, 1]  # aspect ratio
-        irect = ar.argsort()
-        self.im_files = [self.im_files[i] for i in irect]
-        self.labels = [self.labels[i] for i in irect]
-        ar = ar[irect]
-
-        # Short-side-scaling: short = imgsz, long = imgsz / ar (wide) or imgsz * ar (tall).
-        # Batch shape bounds all images (handles mixed batches).
-        shapes = [[1, 1]] * nb
-        for i in range(nb):
-            ari = ar[bi == i]
-            mini, maxi = ari.min(), ari.max()
-            shapes[i] = [max(maxi, 1), 1 / min(mini, 1)]
-
-        self.batch_shapes = np.ceil(np.array(shapes) * self.imgsz / self.stride + self.pad).astype(int) * self.stride
-        self.batch = bi  # batch index of image
-
+        super().set_rectangle()
         self.mask_files = [lb["mask_file"] for lb in self.labels]
 
     def _fallback_mask_shape(self, index: int, image_shape: tuple[int, int] | None = None) -> tuple[int, int]:
