@@ -8,17 +8,7 @@ from collections.abc import Mapping
 import torch
 
 DEFAULT_CLASS_ALIASES: dict[str, str | list[str]] = {
-    # COCO -> Objects365 name overrides. Aliases are used only when direct name matching fails.
-    "bird": "wild bird",
-    "handbag": "handbag/satchel",
-    "suitcase": "luggage",
-    "bowl": "bowl/basin",
-    "orange": "orange/tangerine",
-    "tv": "monitor/tv",
-    "teddy bear": "stuffed toy",
-    "hair drier": "hair dryer",
-    "skis": "skating and skiing shoes",
-    "sports ball": "baseball",
+    # Aliases are used only when direct name matching fails.
 }
 
 DEFAULT_CLASS_KEY_HINTS: tuple[str, ...] = ("score_head", "class_embed")
