@@ -1691,7 +1691,7 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
             targets (torch.Tensor | np.ndarray): Ground truth class IDs [B, H, W].
         """
         if self.matrix is None:
-            self.matrix = torch.zeros((self.cm_nc, self.cm_nc), device=preds.device, dtype=torch.int32)
+            self.matrix = torch.zeros((self.cm_nc, self.cm_nc), device=preds.device, dtype=torch.float32)
 
         valid = (targets != 255) & (preds >= 0) & (preds < self.cm_nc) & (targets >= 0) & (targets < self.cm_nc)
         hist = torch.bincount(self.cm_nc * targets[valid] + preds[valid], minlength=self.cm_nc**2).reshape(
@@ -1700,12 +1700,11 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         self.matrix += hist.to(self.matrix.dtype)
 
         # Track per-image class presence
-        # TODO
         for b in range(targets.shape[0]):
             valid_b = valid[b]
             if not valid_b.any():
                 continue
-            classes = torch.unique(targets[b][valid_b]).cpu().numpy()
+            classes = torch.unique(targets[b][valid_b])
             for c in classes:
                 if self.nc == 1 and c == 1:
                     self.nt_per_image[0] += 1
@@ -1723,11 +1722,10 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         if self.matrix is None:
             return
 
-        cm = self.matrix.to(torch.float32)
-        intersection = torch.diagonal(cm)
-        union = cm.sum(1) + cm.sum(0) - intersection
+        intersection = torch.diagonal(self.matrix)
+        union = self.matrix.sum(1) + self.matrix.sum(0) - intersection
         iou = intersection / (union + 1e-10)
-        row_sum = cm.sum(1)
+        row_sum = self.matrix.sum(1)
         pa = intersection / (row_sum + 1e-10)
 
         if self.nc == 1:
@@ -1741,7 +1739,7 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
             self._per_class_pixel_acc = pa.cpu().numpy()
             self.nt_per_class = row_sum[: self.nc].cpu().numpy().astype(np.int32)
 
-        self._pixel_accuracy = float((intersection.sum() / (cm.sum() + 1e-10)).item())
+        self._pixel_accuracy = float((intersection.sum() / (self.matrix.sum() + 1e-10)).item())
 
         if plot:
             self._plot_iou_bars(save_dir, on_plot)
@@ -1792,7 +1790,7 @@ class SemsegMetrics(SimpleClass, DataExportMixin):
         """
         import matplotlib.pyplot as plt
 
-        cm = self.matrix.cpu().numpy().astype(np.float32)
+        cm = self.matrix.cpu().numpy()
         for normalize in (False, True):
             fig, ax = plt.subplots(1, 1, figsize=(12, 9))
             array = cm.copy()
