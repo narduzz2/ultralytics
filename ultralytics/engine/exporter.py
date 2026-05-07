@@ -159,6 +159,7 @@ def export_formats():
         ["RKNN", "rknn", "_rknn_model", False, False, ["batch", "name"]],
         ["ExecuTorch", "executorch", "_executorch_model", True, False, ["batch"]],
         ["Axelera AI", "axelera", "_axelera_model", False, False, ["batch", "int8", "fraction", "data"]],
+        ["Ethos", "ethos", "_ethos_model", False, False, ["data", "int8", "target"]],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments"], zip(*x)))
 
@@ -174,7 +175,8 @@ def validate_args(format, passed_args, valid_args):
     Raises:
         AssertionError: If an unsupported argument is used, or if the format lacks supported argument listings.
     """
-    export_args = ["half", "int8", "dynamic", "keras", "nms", "batch", "fraction", "data"]
+
+    export_args = ["half", "int8", "dynamic", "keras", "nms", "batch", "fraction", "data", "target"]
 
     assert valid_args is not None, f"ERROR ❌️ valid arguments for '{format}' not listed."
     custom = {"batch": 1, "data": None, "device": None}  # exporter defaults
@@ -324,6 +326,11 @@ class Exporter:
                 self.args.int8 = True
             if not self.args.data:
                 self.args.data = TASK2CALIBRATIONDATA.get(model.task)
+        if fmt == "ethos":
+            if not self.args.int8:
+                LOGGER.warning("Ethos export requires INT8 quantization, setting int8=True.")
+                self.args.int8 = True
+            self.args.target = self.args.target or "ethos-u55-128"
         if fmt == "edgetpu" and not self.args.int8:
             LOGGER.warning("Edge TPU export requires int8=True, setting int8=True.")
             self.args.int8 = True
@@ -344,7 +351,7 @@ class Exporter:
         if hasattr(model, "end2end"):
             if self.args.end2end is not None:
                 model.end2end = self.args.end2end
-            if fmt in {"rknn", "ncnn", "executorch", "paddle", "imx", "edgetpu"}:
+            if fmt in {"rknn", "ncnn", "executorch", "ethos", "paddle", "imx", "edgetpu"}:
                 # Disable end2end branch for certain export formats as they does not support topk
                 model.end2end = False
                 LOGGER.warning(f"{fmt.upper()} export does not support end2end models, disabling end2end branch.")
@@ -455,7 +462,7 @@ class Exporter:
             from ultralytics.utils.export.tensorflow import tf_wrapper
 
             model = tf_wrapper(model)
-        if fmt == "executorch":
+        if fmt in {"executorch", "ethos"}:
             from ultralytics.utils.export.executorch import executorch_wrapper
 
             model = executorch_wrapper(model)
@@ -995,6 +1002,22 @@ class Exporter:
             model=self.model,
             im=self.im,
             output_dir=str(self.file).replace(self.file.suffix, "_executorch_model/"),
+            metadata=self.metadata,
+            prefix=prefix,
+        )
+
+    @try_export
+    def export_ethos(self, prefix=colorstr("Ethos:")):
+        """Export YOLO model to Arm Ethos-U NPU ExecuTorch *.pte format."""
+        assert TORCH_2_9, f"ExecuTorch requires torch>=2.9.0 but torch=={TORCH_VERSION} is installed"
+        from ultralytics.utils.export.ethos import torch2ethos
+
+        return torch2ethos(
+            self.model,
+            self.file,
+            self.im,
+            dataset=self.get_int8_calibration_dataloader(prefix),
+            target=self.args.target,
             metadata=self.metadata,
             prefix=prefix,
         )
