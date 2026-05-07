@@ -826,20 +826,9 @@ class SemsegDataset(BaseDataset):
         super().set_rectangle()
         self.mask_files = [lb["mask_file"] for lb in self.labels]
 
-    @staticmethod
-    def _read_mask_file(mask_path: str) -> np.ndarray | None:
-        """Read a semantic mask from disk."""
-        if not os.path.exists(mask_path):
-            return None
-        try:
-            with Image.open(mask_path) as im:
-                return np.array(im, dtype=np.uint8)
-        except Exception:
-            return cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-
     def load_mask(self, index: int, image_shape: tuple[int, int] | None = None) -> np.ndarray:
         """Load and map a semantic mask from source mask file."""
-        mask = self._read_mask_file(self.mask_files[index])
+        mask = cv2.imread(self.mask_files[index], cv2.IMREAD_GRAYSCALE)
         if mask is None:
             return np.full(image_shape, self.ignore_label, dtype=np.uint8)
         if self.label_mapping:
