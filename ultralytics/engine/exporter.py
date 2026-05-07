@@ -175,7 +175,6 @@ def validate_args(format, passed_args, valid_args):
     Raises:
         AssertionError: If an unsupported argument is used, or if the format lacks supported argument listings.
     """
-
     export_args = ["half", "int8", "dynamic", "keras", "nms", "batch", "fraction", "data", "target"]
 
     assert valid_args is not None, f"ERROR ❌️ valid arguments for '{format}' not listed."
