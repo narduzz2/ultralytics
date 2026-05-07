@@ -160,7 +160,7 @@ The Ultralytics team benchmarked YOLO26 across various model formats and [precis
 
     - All benchmarks were run with `openvino` Python package version [2026.2.0.dev20260501](https://docs.openvino.ai/2026/get-started/install-openvino.html?PACKAGE=OPENVINO_BASE&VERSION=NIGHTLY&OP_SYSTEM=LINUX&DISTRIBUTION=PIP). We will update benchmarks with stable build once version 2026.2.0 is released.
 
-    - YOLO26 models on NPU are only supported on Intel® Core™ Ultra™ systems with Intel Panther Lake family and above.
+    - YOLO26 models on NPU are only supported on Intel® Core™ Ultra™ systems with 2xxV series and 3xx series and above.
 
 ### Intel® Core™ Ultra
 
@@ -181,7 +181,7 @@ Benchmarks below run on Intel® Core™ Ultra™ 7 258V and Intel® Core™ Ultr
     === "Integrated Intel® Arc™ GPU"
 
         <div align="center">
-        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-265K-gpu.avif" alt="Intel Core Ultra GPU benchmarks">
+        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-258V-gpu.avif" alt="Intel Core Ultra GPU benchmarks">
         </div>
 
         ??? abstract "Detailed Benchmark Results"
@@ -209,10 +209,10 @@ Benchmarks below run on Intel® Core™ Ultra™ 7 258V and Intel® Core™ Ultr
             | YOLO26x | OpenVINO      | FP16      | ✅      | 107.1     | 0.6454              | 20.25                  |
             | YOLO26x | OpenVINO      | INT8      | ✅      | 54.8      | 0.6374              | 14.77                  |
 
-    === "Intel® Arrow Lake CPU"
+    === "Intel® Lunar Lake CPU"
 
         <div align="center">
-        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-265K-cpu.avif" alt="Intel Core Ultra CPU benchmarks">
+        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-258V-cpu.avif" alt="Intel Core Ultra CPU benchmarks">
         </div>
 
         ??? abstract "Detailed Benchmark Results"
@@ -278,7 +278,7 @@ Benchmarks below run on Intel® Core™ Ultra™ 7 258V and Intel® Core™ Ultr
     === "Integrated Intel® Arc™ GPU"
 
         <div align="center">
-        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-258V-gpu.avif" alt="Intel Core Ultra GPU benchmarks">
+        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-155H-gpu.avif" alt="Intel Core Ultra GPU benchmarks">
         </div>
 
         ??? abstract "Detailed Benchmark Results"
@@ -309,7 +309,7 @@ Benchmarks below run on Intel® Core™ Ultra™ 7 258V and Intel® Core™ Ultr
     === "Intel® Meteor Lake CPU"
 
         <div align="center">
-        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-258V-cpu.avif" alt="Intel Core Ultra CPU benchmarks">
+        <img width="800" src="https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/openvino-ultra7-155H-cpu.avif" alt="Intel Core Ultra CPU benchmarks">
         </div>
 
         ??? abstract "Detailed Benchmark Results"
