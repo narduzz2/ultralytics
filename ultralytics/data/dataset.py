@@ -828,19 +828,6 @@ class SemsegDataset(BaseDataset):
         super().set_rectangle()
         self.mask_files = [lb["mask_file"] for lb in self.labels]
 
-    def _fallback_mask_shape(self, index: int, image_shape: tuple[int, int] | None = None) -> tuple[int, int]:
-        """Resolve fallback mask shape when source mask is missing/corrupt."""
-        if image_shape is not None:
-            return image_shape
-        if self.im_hw[index] is not None:
-            return self.im_hw[index]
-        if self.im_hw0[index] is not None:
-            return self.im_hw0[index]
-        if "shape" in self.labels[index]:
-            return self.labels[index]["shape"]
-        im = cv2.imread(self.im_files[index], self.cv2_flag)
-        return im.shape[:2] if im is not None else (self.imgsz, self.imgsz)
-
     @staticmethod
     def _read_mask_file(mask_path: str) -> np.ndarray | None:
         """Read a semantic mask from disk."""
@@ -1109,7 +1096,7 @@ class PolygonSemsegDataset(SemsegDataset):
 
     def load_mask(self, index: int, image_shape: tuple[int, int] | None = None) -> np.ndarray:
         """Rasterize this image's polygons into a (H, W) uint8 semantic mask, bg = self.bg_class_idx."""
-        h, w = image_shape if image_shape is not None else self._fallback_mask_shape(index)
+        h, w = image_shape
         label = self.labels[index]
         cls = label.get("cls")
         segments = label.get("segments") or []
