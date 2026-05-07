@@ -746,11 +746,6 @@ class RTDETRDetectionModel(DetectionModel):
         """
         super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
 
-    @staticmethod
-    def _is_default_numeric_names(names) -> bool:
-        """Return True if names look like default numeric placeholders."""
-        return is_default_numeric_names(names)
-
     def load(self, weights, verbose=True, src_names=None, dst_names=None):
         """Load weights with optional RT-DETR class-row remapping for cross-dataset transfer."""
         model = weights["model"] if isinstance(weights, dict) else weights
