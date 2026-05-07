@@ -32,7 +32,7 @@ Export an Ultralytics YOLO model to DeepX format and run inference with the expo
 
 !!! note
 
-    DeepX export is only supported on **x86-64 Linux** machines. ARM64 (aarch64) is not supported for the export step.
+    DeepX export is only supported on x86-64 Linux machines. ARM64 (aarch64) is not supported for the export step.
 
 ### Installation
 
@@ -110,47 +110,30 @@ Once you've successfully exported your Ultralytics YOLO model to DeepX format, t
 
 ### Runtime Installation
 
-Inference requires the DeepX NPU driver, the `libdxrt` runtime, and the `dx_engine` Python package. Choose the install path that matches your platform.
+Inference requires the DeepX NPU driver, the `libdxrt` runtime, and the `dx_engine` Python package.
 
-!!! example "ARM64 Debian Trixie (Sixfab APT)"
+!!! note
 
-    === "CLI"
+    DeepX runtime is only supported on x86-64 Linux machines and ARM64 Debian Trixie machines (Raspberry Pi 5).
 
-        ```bash
-        # Add the Sixfab APT repository
-        wget -qO - https://sixfab.github.io/sixfab_dx/public.gpg | sudo gpg --dearmor -o /usr/share/keyrings/sixfab-dx.gpg
-        echo "deb [signed-by=/usr/share/keyrings/sixfab-dx.gpg] https://sixfab.github.io/sixfab_dx trixie main" | sudo tee /etc/apt/sources.list.d/sixfab-dx.list
+```bash
+# Build dependencies for the DKMS NPU driver module
+sudo apt update
+sudo apt install -y dkms
 
-        # Install the DeepX runtime
-        sudo apt update
-        sudo apt install -y sixfab-dx
+# Install the NPU driver and libdxrt runtime
+wget https://github.com/DEEPX-AI/dx_rt_npu_linux_driver/raw/main/release/2.4.0/dxrt-driver-dkms_2.4.0-2_all.deb
+sudo dpkg -i dxrt-driver-dkms_2.4.0-2_all.deb
+wget https://github.com/DEEPX-AI/dx_rt/raw/main/release/3.3.1/libdxrt_3.3.1_all.deb
+sudo dpkg -i libdxrt_3.3.0_all.deb
 
-        # Install the bundled dx_engine Python wheel
-        pip install /opt/sixfab-dx/wheels/dx_engine-*.whl
-        ```
-
-!!! example "x86-64 Linux (DEEPX .deb packages)"
-
-    === "CLI"
-
-        ```bash
-        # Build dependencies for the DKMS NPU driver module
-        sudo apt update
-        sudo apt install -y dkms libncurses-dev
-
-        # Install the NPU driver and libdxrt runtime
-        wget https://github.com/DEEPX-AI/dx_rt_npu_linux_driver/raw/main/release/2.4.0/dxrt-driver-dkms_2.4.0-2_all.deb
-        sudo dpkg -i dxrt-driver-dkms_2.4.0-2_all.deb
-        wget https://github.com/DEEPX-AI/dx_rt/raw/main/release/3.3.0/libdxrt_3.3.0_all.deb
-        sudo dpkg -i libdxrt_3.3.0_all.deb
-
-        # Install the bundled dx_engine Python wheel
-        pip install /usr/share/libdxrt/src/python_package/dx_engine-*.whl
-        ```
+# Install the bundled dx_engine Python wheel
+pip install /usr/share/libdxrt/src/python_package/dx_engine-*.whl
+```
 
 Verify the runtime is installed correctly with `dxrt-cli --version`. You should see output similar to:
 
-```text
+```sh
 DXRT v3.3.0
 Minimum Driver Versions
   Device Driver: v2.4.0
