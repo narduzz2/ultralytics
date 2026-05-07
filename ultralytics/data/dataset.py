@@ -1023,19 +1023,6 @@ class SemsegDataset(BaseDataset):
         label["semantic_mask"] = mask
         return label
 
-    def __getitem__(self, index):
-        """Return transformed image and semantic mask for the given index.
-
-        Args:
-            index (int): Dataset index.
-
-        Returns:
-            (dict): Dictionary with 'img' tensor and 'semantic_mask' tensor.
-        """
-        label = self.get_image_and_label(index)
-        label = self.transforms(label)
-        return label
-
     @staticmethod
     def collate_fn(batch):
         """Collate semantic segmentation batch into tensors.
