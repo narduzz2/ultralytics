@@ -758,9 +758,7 @@ class RTDETRDetectionModel(DetectionModel):
             dst_names = getattr(self, "names", None)
 
         dn_discard = [
-            k
-            for k in csd
-            if "denoising_class_embed" in k and k in state_dict and csd[k].shape != state_dict[k].shape
+            k for k in csd if "denoising_class_embed" in k and k in state_dict and csd[k].shape != state_dict[k].shape
         ]
         for k in dn_discard:
             del csd[k]
