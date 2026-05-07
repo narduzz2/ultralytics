@@ -17,7 +17,7 @@ def torch2ethos(
     file: Path | str,
     sample_input: torch.Tensor,
     dataset: Iterable[Any] | None = None,
-    target: str = "ethos-u55-128",
+    target: str = "ethos-u85-256",
     metadata: dict | None = None,
     prefix: str = "",
 ) -> str:

@@ -329,7 +329,7 @@ class Exporter:
             if not self.args.int8:
                 LOGGER.warning("Ethos export requires INT8 quantization, setting int8=True.")
                 self.args.int8 = True
-            self.args.target = self.args.target or "ethos-u55-128"
+            self.args.target = self.args.target or "ethos-u85-256"
         if fmt == "edgetpu" and not self.args.int8:
             LOGGER.warning("Edge TPU export requires int8=True, setting int8=True.")
             self.args.int8 = True
