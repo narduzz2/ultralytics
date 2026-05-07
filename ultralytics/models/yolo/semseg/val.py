@@ -48,6 +48,7 @@ class SemanticSegmentationValidator(BaseValidator):
         self.args.task = "semseg"
         self.dataset = None
         self.results_dir = None
+        self.metrics = SemsegMetrics()
         self.image_shapes = {}
         self._semantic_target_shape = None
 
