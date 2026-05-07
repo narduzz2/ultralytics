@@ -17,6 +17,7 @@ from ultralytics.data.dataset import PolygonSemsegDataset, SemsegDataset, add_po
 from ultralytics.engine.validator import BaseValidator
 from ultralytics.utils import LOGGER, RANK
 from ultralytics.utils.metrics import SemsegMetrics
+from ultralytics.utils.plotting import colors, plot_images, plt_settings
 
 
 class SemanticSegmentationValidator(BaseValidator):
@@ -25,7 +26,7 @@ class SemanticSegmentationValidator(BaseValidator):
     This validator evaluates semantic segmentation models using mIoU and pixel accuracy metrics.
 
     Attributes:
-        metrics (SemanticMetrics): Metrics calculator for semantic segmentation.
+        metrics (SemsegMetrics): Metrics calculator for semantic segmentation.
 
     Examples:
         >>> from ultralytics.models.yolo.semseg import SemanticSegmentationValidator
@@ -45,9 +46,9 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         super().__init__(dataloader, save_dir, args, _callbacks)
         self.args.task = "semseg"
-        self.metrics = SemsegMetrics()
         self.dataset = None
         self.results_dir = None
+        self.metrics = SemsegMetrics()
         self.image_shapes = {}
         self._semantic_target_shape = None
 
@@ -59,7 +60,8 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         self.names = model.names
         self.nc = len(self.names)
-        self.metrics = SemsegMetrics(names=self.names, device=self.device)
+        self.metrics = SemsegMetrics(names=self.names)
+        self.seen = 0
         self.dataset = getattr(self.dataloader, "dataset", None)
         labels = getattr(self.dataset, "labels", []) if self.dataset is not None else []
         self.image_shapes = {lb["im_file"]: tuple(lb["shape"]) for lb in labels if "im_file" in lb and "shape" in lb}
@@ -117,7 +119,8 @@ class SemanticSegmentationValidator(BaseValidator):
             preds = F.interpolate(preds.float().unsqueeze(1), targets.shape[1:], mode="nearest").squeeze(1).long()
         if self.args.save_json:
             self.save_pred_masks(preds, batch)
-        self.metrics.process(preds, targets)
+        self.metrics.update_stats(preds, targets)
+        self.seen += preds.shape[0]
 
     def finalize_metrics(self):
         """Set final values on semantic metrics."""
@@ -128,20 +131,25 @@ class SemanticSegmentationValidator(BaseValidator):
         """Reduce semantic confusion matrix to rank 0 during DDP validation."""
         if RANK == -1 or not dist.is_available() or not dist.is_initialized():
             return
-        if self.metrics.confusion_matrix.matrix is None:
+        if self.metrics.matrix is None:
             cm_nc = self.metrics.cm_nc
-            self.metrics.confusion_matrix.matrix = torch.zeros((cm_nc, cm_nc), device=self.device, dtype=torch.int64)
-        dist.reduce(self.metrics.confusion_matrix.matrix, dst=0, op=dist.ReduceOp.SUM)
+            self.metrics.matrix = torch.zeros((cm_nc, cm_nc), device=self.device, dtype=torch.int64)
+        dist.reduce(self.metrics.matrix, dst=0, op=dist.ReduceOp.SUM)
+        # Gather nt_per_image across ranks
+        if RANK == 0:
+            gathered_nt = [None] * dist.get_world_size()
+            dist.gather_object(self.metrics.nt_per_image, gathered_nt, dst=0)
+            self.metrics.nt_per_image = np.sum(gathered_nt, axis=0)
+        elif RANK > 0:
+            dist.gather_object(self.metrics.nt_per_image, None, dst=0)
 
     def save_pred_masks(self, preds: torch.Tensor, batch: dict[str, Any]) -> None:
         """Save semantic predictions as single-channel PNG masks."""
         if self.results_dir is None:
             return
-
         im_files = batch.get("im_file", [])
         if not im_files:
             return
-
         preds = preds.cpu().numpy()
         if isinstance(self.dataset, SemsegDataset) and self.dataset.label_mapping:
             preds = self.dataset.convert_label(preds, inverse=True)
@@ -159,6 +167,7 @@ class SemanticSegmentationValidator(BaseValidator):
         Returns:
             (dict): Dictionary of validation metrics.
         """
+        self.metrics.process(save_dir=self.save_dir, plot=self.args.plots, on_plot=self.on_plot)
         return self.metrics.results_dict
 
     def get_desc(self):
@@ -167,18 +176,25 @@ class SemanticSegmentationValidator(BaseValidator):
         Returns:
             (str): Formatted string with metric names.
         """
-        return ("%22s" + "%11s" * 2) % ("Class", "mIoU", "PixAcc")
+        return ("%22s" + "%11s" * 4) % ("Class", "Images", "Instances", "mIoU", "PixAcc")
 
     def print_results(self):
         """Print validation results including per-class IoU."""
-        pf = "%22s" + "%11.4f" * 2  # print format
-        LOGGER.info(pf % ("all", self.metrics.miou, self.metrics.pixel_accuracy))
-        # Per-class IoU
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)
+        LOGGER.info(pf % ("all", self.seen, self.metrics.nt_per_class.sum(), *self.metrics.mean_results()))
+        if self.metrics.nt_per_class.sum() == 0:
+            LOGGER.warning(f"no labels found in {self.args.task} set, cannot compute metrics without labels")
         if self.args.verbose and not self.training and self.nc > 1:
-            per_class = self.metrics.per_class_iou
-            for i, name in self.names.items():
-                if i < len(per_class):
-                    LOGGER.info(f"  {name}: IoU={per_class[i]:.4f}")
+            for i, c in enumerate(self.metrics.ap_class_index):
+                LOGGER.info(
+                    pf
+                    % (
+                        self.names[c],
+                        self.metrics.nt_per_image[c],
+                        self.metrics.nt_per_class[c],
+                        *self.metrics.class_result(i),
+                    )
+                )
         if self.args.save_json and self.results_dir is not None:
             LOGGER.info(f"Semantic prediction masks saved to {self.results_dir}")
 
@@ -226,3 +242,85 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         dataset = self.build_dataset(dataset_path, batch=batch_size)
         return build_dataloader(dataset, batch=batch_size, workers=self.args.workers * 2, shuffle=False, rank=-1)
+
+    @plt_settings()
+    def plot_val_samples(self, batch, ni):
+        """Plot validation image samples with semantic mask overlays.
+
+        Args:
+            batch (dict): Batch containing images and semantic masks.
+            ni (int): Batch index.
+        """
+        images = batch["img"]
+        masks = batch["semantic_mask"]
+        bs = min(len(images), 16)
+        images = images[:bs]
+        masks = masks[:bs]
+        images_np = images.cpu().float().numpy()
+        if images_np.max() <= 1:
+            images_np *= 255
+        masks_np = masks.cpu().numpy()
+        overlaid = []
+        for i in range(bs):
+            img = images_np[i].transpose(1, 2, 0).astype(np.uint8)
+            if img.shape[2] == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            mask = masks_np[i]
+            overlay = np.zeros_like(img)
+            for cls_id in np.unique(mask):
+                if cls_id == 255:
+                    continue
+                overlay[mask == cls_id] = colors(int(cls_id), True)
+            img = cv2.addWeighted(img, 0.6, overlay, 0.4, 0)
+            if img.shape[2] == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            overlaid.append(img)
+        overlaid = np.stack(overlaid).transpose(0, 3, 1, 2)
+        plot_images(
+            labels={"img": overlaid, "cls": np.zeros(0)},
+            paths=batch.get("im_file", []),
+            fname=self.save_dir / f"val_batch{ni}_labels.jpg",
+            names=self.names,
+            on_plot=self.on_plot,
+        )
+
+    @plt_settings()
+    def plot_predictions(self, batch, preds, ni):
+        """Plot predicted semantic masks on input images.
+
+        Args:
+            batch (dict): Batch containing images.
+            preds (torch.Tensor): Predicted class IDs [B, H, W].
+            ni (int): Batch index.
+        """
+        images = batch["img"]
+        bs = min(len(images), 16)
+        images = images[:bs]
+        preds = preds[:bs]
+        images_np = images.cpu().float().numpy()
+        if images_np.max() <= 1:
+            images_np *= 255
+        preds_np = preds.cpu().numpy() if isinstance(preds, torch.Tensor) else preds
+        overlaid = []
+        for i in range(bs):
+            img = images_np[i].transpose(1, 2, 0).astype(np.uint8)
+            if img.shape[2] == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            mask = preds_np[i]
+            overlay = np.zeros_like(img)
+            for cls_id in np.unique(mask):
+                if cls_id == 255:
+                    continue
+                overlay[mask == cls_id] = colors(int(cls_id), True)
+            img = cv2.addWeighted(img, 0.6, overlay, 0.4, 0)
+            if img.shape[2] == 3:
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            overlaid.append(img)
+        overlaid = np.stack(overlaid).transpose(0, 3, 1, 2)
+        plot_images(
+            labels={"img": overlaid, "cls": np.zeros(0)},
+            paths=batch.get("im_file", []),
+            fname=self.save_dir / f"val_batch{ni}_pred.jpg",
+            names=self.names,
+            on_plot=self.on_plot,
+        )
