@@ -83,6 +83,7 @@ def torch2ethos(
     quantized_exported_program = torch.export.export(quantized_graph_module, (sample_input,))
 
     from executorch.backends.arm.ethosu import EthosUPartitioner
+    from executorch.backends.cortex_m.passes.replace_quant_nodes_pass import ReplaceQuantNodesPass
     from executorch.exir import (
         EdgeCompileConfig,
         ExecutorchBackendConfig,
@@ -100,6 +101,12 @@ def torch2ethos(
             _check_ir_validity=False,
         ),
     )
+
+    # Rewrite remaining CPU-side quantized_decomposed::{quantize,dequantize}_per_tensor.out
+    # ops at the Ethos-U delegate boundaries into cortex_m::* ops the Zephyr/Cortex-M
+    # runtime registers. Without this pass, the .pte fails at runtime with
+    # "Missing operator: quantized_decomposed::quantize_per_tensor.out".
+    edge_program_manager = edge_program_manager.transform([ReplaceQuantNodesPass()])
 
     # Convert edge program to executorch
     executorch_program_manager = edge_program_manager.to_executorch(
