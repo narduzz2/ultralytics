@@ -213,6 +213,31 @@ def verify_image(args: tuple) -> tuple:
     return (im_file, cls), nf, nc, msg
 
 
+def verify_image_mask(args: tuple) -> tuple:
+    """Verify one image-mask pair."""
+    im_file, mask_file, prefix = args
+    # Number (found, corrupt), message
+    nf, nc, msg = 0, 0, ""
+    try:
+        msg, shape = check_image(im_file)
+        msg = f"{prefix}{msg}" if msg else ""
+        if not os.path.isfile(mask_file):
+            for ext in IMG_FORMATS:  # check other suffixes
+                alt_mask_file = mask_file.rsplit(".", 1)[0] + f".{ext}"
+                if os.path.isfile(alt_mask_file):
+                    nf = 1  # mask found
+                    mask_file = alt_mask_file
+                    break
+        else:
+            # TODO: shape check between image and mask?
+            # TODO: pixel maximum value check?
+            nf = 1
+    except Exception as e:
+        nc = 1
+        msg = f"{prefix}{im_file}: ignoring corrupt image/mask: {e}"
+    return im_file, mask_file, shape, nf, nc, msg
+
+
 def verify_image_label(args: tuple) -> list:
     """Verify one image-label pair."""
     im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim, single_cls = args
