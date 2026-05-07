@@ -107,10 +107,9 @@ class RTDETRTrainer(DetectionTrainer):
         backbone_lr_ratio = self.args.backbone_lr_ratio
         if backbone_lr_ratio <= 0:
             raise ValueError(f"Invalid backbone_lr_ratio={backbone_lr_ratio}. Expected > 0.")
-        if backbone_lr_ratio == 1.0:
-            return super().build_optimizer(
-                model, name=name, lr=lr, momentum=momentum, decay=decay, iterations=iterations
-            )
+        # Normalize optimizer name once so case-insensitive aliases (e.g. "Auto", "musgd") behave correctly
+        optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "MuSGD", "auto"}
+        name = {x.lower(): x for x in optimizers}.get(name.lower(), name)
         g = [{}, {}, {}, {}, {}, {}, {}, {}]  # 8 groups: head 0-3, backbone 4-7 (indices 3, 7 are muon)
         bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)
         if name == "auto":
@@ -144,8 +143,6 @@ class RTDETRTrainer(DetectionTrainer):
                 else:
                     g[base + 0][fullname] = param
 
-        optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSProp", "SGD", "MuSGD", "auto"}
-        name = {x.lower(): x for x in optimizers}.get(name.lower())
         if name in {"Adam", "Adamax", "AdamW", "NAdam", "RAdam"}:
             optim_args = dict(lr=lr, betas=(momentum, 0.999), weight_decay=0.0)
         elif name == "RMSProp":
