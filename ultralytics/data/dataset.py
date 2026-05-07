@@ -823,6 +823,7 @@ class SemsegDataset(BaseDataset):
         """Load an image for semantic segmentation, scaling the short side to imgsz when rect_mode=True."""
         return super().load_image(i, rect_mode=rect_mode, resize_short=True)
 
+    # TODO
     def set_rectangle(self):
         """Sort by aspect ratio and set batch shapes for short-side-scaled semantic inputs."""
         bi = np.floor(np.arange(self.ni) / self.batch_size).astype(int)  # batch index
@@ -876,8 +877,7 @@ class SemsegDataset(BaseDataset):
         """Load and map a semantic mask from source mask file."""
         mask = self._read_mask_file(self.mask_files[index])
         if mask is None:
-            h, w = self._fallback_mask_shape(index, image_shape=image_shape)
-            return np.full((h, w), self.ignore_label, dtype=np.uint8)
+            return np.full(image_shape, self.ignore_label, dtype=np.uint8)
         if self.label_mapping:
             mask = self.convert_label(mask, inverse=False)
         return mask.astype(np.uint8, copy=False)
@@ -953,18 +953,6 @@ class SemsegDataset(BaseDataset):
                 label[temp == k] = v
         return label
 
-    def _load_semantic_mask(self, index, image_shape: tuple[int, int] | None = None):
-        """Load semantic mask for the given index.
-
-        Args:
-            index (int): Dataset index.
-
-        Returns:
-            (np.ndarray): Semantic mask array (H, W) with class IDs, 255 for ignore.
-        """
-        mask = self.load_mask(index, image_shape=image_shape)
-        return mask
-
     def get_image_and_label(self, index):
         """Get image, label and semantic mask for the given index.
 
@@ -979,7 +967,7 @@ class SemsegDataset(BaseDataset):
         """
         label = super().get_image_and_label(index)
         h, w = label["img"].shape[:2]
-        mask = self._load_semantic_mask(index, image_shape=(h, w))
+        mask = self.load_mask(index, image_shape=(h, w))
         # Resize mask to match the resized image dimensions
         if mask.shape[:2] != (h, w):
             mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
@@ -1159,19 +1147,6 @@ class PolygonSemsegDataset(SemsegDataset):
         fg = inst > 0
         out[fg] = cls_arr[inst[fg] - 1].astype(np.uint8)
         return out
-
-    def _fallback_mask_shape(self, index: int, image_shape: tuple[int, int] | None = None) -> tuple[int, int]:
-        """Resolve mask shape when image_shape is unavailable; never reads PNG masks."""
-        if image_shape is not None:
-            return image_shape
-        if self.im_hw[index] is not None:
-            return self.im_hw[index]
-        if self.im_hw0[index] is not None:
-            return self.im_hw0[index]
-        if "shape" in self.labels[index]:
-            return self.labels[index]["shape"]
-        im = cv2.imread(self.im_files[index], self.cv2_flag)
-        return im.shape[:2] if im is not None else (self.imgsz, self.imgsz)
 
     def set_rectangle(self):
         """Aspect-ratio batching; keep mask_files aligned with reordered im_files (no source masks)."""
