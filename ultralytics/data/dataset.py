@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 import os
-import random
 from collections import defaultdict
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
@@ -48,6 +47,7 @@ from .utils import (
     polygons2masks_overlap,
     save_dataset_cache_file,
     verify_image,
+    verify_image_mask,
     verify_image_label,
 )
 
@@ -735,28 +735,6 @@ class SemsegDataset(BaseDataset):
             normalized[src] = dst
         return normalized
 
-    # TODO
-    def _get_mask_dir(self) -> Path:
-        """Build mask directory by replacing `images` path component with configured masks dir."""
-        masks_dir_name = self.data.get("masks_dir", "masks")
-        img_path = Path(self.img_path[0] if isinstance(self.img_path, list) else self.img_path)
-        parts = list(img_path.parts)
-        for i, p in enumerate(parts):
-            if p == "images":
-                parts[i] = masks_dir_name
-                break
-        return Path(*parts)
-
-    @staticmethod
-    def _resolve_mask_file(im_file: str, mask_dir: Path) -> str:
-        """Resolve semantic mask path for an image using common mask extensions."""
-        stem = Path(im_file).stem
-        for ext in (".png", ".PNG", ".bmp", ".tif"):
-            candidate = mask_dir / f"{stem}{ext}"
-            if candidate.exists():
-                return str(candidate)
-        return str(mask_dir / f"{stem}.png")
-
     def _semantic_cache_hash(self, mask_files: list[str]) -> str:
         """Return a hash for semantic cache validation that also includes label_mapping changes."""
         mapping = json.dumps(self.label_mapping, sort_keys=True, separators=(",", ":"))
@@ -772,55 +750,42 @@ class SemsegDataset(BaseDataset):
             (dict[str, Any]): Cached semantic metadata.
         """
         x = {"labels": []}
-        nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # missing, found, empty, corrupt, messages
+        nm, nf, nc, msgs = 0, 0, 0, []  # missing, found, corrupt, messages
         desc = f"{self.prefix}Scanning {path.parent / path.stem}..."
-        mask_dir = self._get_mask_dir()
         total = len(self.im_files)
 
-        pbar = TQDM(self.im_files, desc=desc, total=total)
-        mask_files = []
-        for im_file in pbar:
-            mask_file = self._resolve_mask_file(im_file, mask_dir)
-            mask_files.append(mask_file)
-
-            try:
-                with Image.open(im_file) as im:
-                    shape = im.size[::-1]  # (h, w)
-            except Exception as e:
-                nc += 1
-                msgs.append(f"{self.prefix}{im_file}: ignoring corrupt image: {e}")
-                pbar.desc = f"{desc} {nf} masks, {nm} missing, {nc} corrupt"
-                continue
-
-            if Path(mask_file).exists():
-                nf += 1
-            else:
-                nm += 1
-                msgs.append(f"{self.prefix}{mask_file}: missing semantic mask, using ignore_label fallback")
-
-            x["labels"].append(
-                {
-                    "im_file": im_file,
-                    "mask_file": mask_file,
-                    "shape": shape,
-                    "cls": np.array([], dtype=np.float32),
-                    "bboxes": np.zeros((0, 4), dtype=np.float32),
-                    "segments": [],
-                    "normalized": True,
-                    "bbox_format": "xywh",
-                }
+        with ThreadPool(NUM_THREADS) as pool:
+            results = pool.imap(
+                func=verify_image_mask,
+                iterable=zip(self.im_files, self.mask_files, repeat(self.prefix)),
             )
-            pbar.desc = f"{desc} {nf} masks, {nm} missing, {nc} corrupt"
-        pbar.close()
-
-        if msgs:
-            LOGGER.info("\n".join(msgs))
-        if nf == 0:
-            LOGGER.warning(f"{self.prefix}No semantic masks found in {mask_dir}.")
-        x["hash"] = self._semantic_cache_hash(mask_files)
-        x["results"] = nf, nm, ne, nc, total
+            pbar = TQDM(results, desc=desc, total=total)
+            for im_file, mask_file, shape, nm_f, nf_f, nc_f, msg in pbar:
+                nm += nm_f
+                nf += nf_f
+                nc += nc_f
+                if im_file:
+                    x["labels"].append(
+                        {
+                            "im_file": im_file,
+                            "mask_file": mask_file,
+                            "shape": shape,
+                            "cls": np.array([], dtype=np.float32),
+                            "bboxes": np.zeros((0, 4), dtype=np.float32),
+                            "segments": [],
+                            "normalized": True,
+                            "bbox_format": "xywh",
+                        }
+                    )
+                if msg:
+                    msgs.append(msg)
+                pbar.desc = f"{desc} {nf} images, {nm} backgrounds, {nc} corrupt"
+            pbar.close()
+        x["hash"] = self._semantic_cache_hash(self.mask_files)
+        x["results"] = nf, nm, nc, total
         x["msgs"] = msgs
-        save_dataset_cache_file(self.prefix, path, x, DATASET_CACHE_VERSION)
+        if x["labels"]:
+            save_dataset_cache_file(self.prefix, path, x, DATASET_CACHE_VERSION)
         return x
 
     def get_labels(self):
@@ -829,21 +794,19 @@ class SemsegDataset(BaseDataset):
         Returns:
             (list[dict]): List of label dictionaries with mask file paths and image shapes.
         """
-        mask_dir = self._get_mask_dir()
-        cache_path = mask_dir.with_suffix(".cache")
-        mask_files = img2label_paths(self.im_files, label_dir=self.data.get("masks_dir", "masks"), suffix=".png")
-        # mask_files = [self._resolve_mask_file(im_file, mask_dir) for im_file in self.im_files]
+        self.mask_files = img2label_paths(self.im_files, label_dir=self.data.get("masks_dir", "masks"), suffix=".png")
+        cache_path = Path(self.mask_files[0]).parent.with_suffix(".cache")
 
         try:
             cache, exists = load_dataset_cache_file(cache_path), True
             assert cache["version"] == DATASET_CACHE_VERSION
-            assert cache["hash"] == self._semantic_cache_hash(mask_files)
+            assert cache["hash"] == self._semantic_cache_hash(self.mask_files)
         except (FileNotFoundError, AssertionError, AttributeError, ModuleNotFoundError):
             cache, exists = self.cache_labels(cache_path), False
 
-        nf, nm, ne, nc, n = cache.pop("results")
+        nf, nm, nc, n = cache.pop("results")
         if exists and LOCAL_RANK in {-1, 0}:
-            d = f"Scanning {cache_path}... {nf} masks, {nm + ne} missing, {nc} corrupt"
+            d = f"Scanning {cache_path}... {nf} masks, {nm} missing, {nc} corrupt"
             TQDM(None, desc=self.prefix + d, total=n, initial=n)
             if cache["msgs"]:
                 LOGGER.info("\n".join(cache["msgs"]))
