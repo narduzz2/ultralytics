@@ -814,21 +814,15 @@ class SemsegDataset(BaseDataset):
         if not labels:
             raise RuntimeError(f"No valid images found in {cache_path}. {HELP_URL}")
         self.im_files = [lb["im_file"] for lb in labels]
-        self.mask_files = [lb["mask_file"] for lb in labels]
         return labels
 
     def load_image(self, i, rect_mode=True):
         """Load an image for semantic segmentation, scaling the short side to imgsz when rect_mode=True."""
         return super().load_image(i, rect_mode=rect_mode, resize_short=True)
 
-    def set_rectangle(self):
-        """Sort by aspect ratio and set batch shapes for short-side-scaled semantic inputs."""
-        super().set_rectangle()
-        self.mask_files = [lb["mask_file"] for lb in self.labels]
-
     def load_mask(self, index: int, image_shape: tuple[int, int] | None = None) -> np.ndarray:
         """Load and map a semantic mask from source mask file."""
-        mask = cv2.imread(self.mask_files[index], cv2.IMREAD_GRAYSCALE)
+        mask = cv2.imread(self.labels[index]["mask_file"], cv2.IMREAD_GRAYSCALE)
         if mask is None:
             return np.full(image_shape, self.ignore_label, dtype=np.uint8)
         if self.label_mapping:

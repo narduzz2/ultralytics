@@ -221,22 +221,21 @@ def verify_image_mask(args: tuple) -> tuple:
     try:
         msg, shape = check_image(im_file)
         msg = f"{prefix}{msg}" if msg else ""
-        if os.path.isfile(mask_file):
-            nf = 1
-            # TODO: shape check between image and mask?
-            # TODO: pixel maximum value check?
-        else:
-            nm = 1
+        if not os.path.isfile(mask_file):
             for ext in IMG_FORMATS:  # check other suffixes
                 alt_mask_file = mask_file.rsplit(".", 1)[0] + f".{ext}"
                 if os.path.isfile(alt_mask_file):
-                    nf, nm = 1, 0  # mask found
                     mask_file = alt_mask_file
                     break
+        if os.path.isfile(mask_file):
+            nf = 1
+        else:
+            nm = 1
+        return im_file, mask_file, shape, nm, nf, nc, msg
     except Exception as e:
         nc = 1
         msg = f"{prefix}{im_file}: ignoring corrupt image: {e}"
-    return im_file, mask_file, shape, nm, nf, nc, msg
+    return None, None, None, nm, nf, nc, msg
 
 
 def verify_image_label(args: tuple) -> list:
