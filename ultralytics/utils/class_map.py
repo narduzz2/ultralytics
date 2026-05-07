@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Mapping
 
 import torch
@@ -40,26 +39,6 @@ def is_default_numeric_names(names) -> bool:
     """Return True if names look like default numeric placeholders."""
     name_list = names_to_list(names)
     return bool(name_list) and all(str(i) == str(v) for i, v in enumerate(name_list))
-
-
-def resolve_names(names, data_yaml):
-    """Resolve class names, falling back to data YAML when names are numeric placeholders."""
-    if names and not is_default_numeric_names(names):
-        return names
-    if isinstance(data_yaml, Path):
-        data_yaml = str(data_yaml)
-    if not isinstance(data_yaml, str) or not data_yaml.endswith((".yaml", ".yml")):
-        return names
-    try:
-        from ultralytics.utils import YAML
-        from ultralytics.utils.checks import check_yaml
-
-        yaml_names = YAML.load(check_yaml(data_yaml)).get("names")
-        if yaml_names and not is_default_numeric_names(yaml_names):
-            return yaml_names
-    except Exception:
-        pass
-    return names
 
 
 def normalize_class_name(name: str) -> str:

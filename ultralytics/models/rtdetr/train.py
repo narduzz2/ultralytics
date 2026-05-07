@@ -7,7 +7,6 @@ from copy import copy
 from ultralytics.models.yolo.detect import DetectionTrainer
 from ultralytics.nn.tasks import RTDETRDetectionModel
 from ultralytics.utils import RANK, colorstr
-from ultralytics.utils.class_map import resolve_names
 
 from .val import RTDETRDataset, RTDETRValidator
 
@@ -55,11 +54,12 @@ class RTDETRTrainer(DetectionTrainer):
         """
         model = RTDETRDetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1)
         if weights:
-            src_args = getattr(weights, "args", None)
-            src_data_yaml = src_args.get("data") if isinstance(src_args, dict) else getattr(src_args, "data", None)
-            src_names = resolve_names(getattr(weights, "names", None), src_data_yaml)
-            dst_names = resolve_names(self.data.get("names"), getattr(self.args, "data", None))
-            model.load(weights, verbose=RANK in {-1, 0}, src_names=src_names, dst_names=dst_names)
+            model.load(
+                weights,
+                verbose=RANK in {-1, 0},
+                src_names=getattr(weights, "names", None),
+                dst_names=self.data.get("names"),
+            )
         return model
 
     def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None):
