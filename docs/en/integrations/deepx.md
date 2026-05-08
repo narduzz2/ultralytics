@@ -262,4 +262,4 @@ The DeepX export pipeline defaults to 100 calibration images using the EMA calib
 
 ### How do I install the DeepX runtime for inference?
 
-The DeepX runtime is not bundled with `ultralytics` and must be installed separately before running inference. On ARM64 Debian Trixie, install via the Sixfab APT repository (`sixfab-dx`). On x86-64 Linux, install the NPU driver (`dxrt-driver-dkms`) and runtime (`libdxrt`) from the DEEPX-AI GitHub releases, then install the bundled `dx_engine` Python wheel. See the [Runtime Installation](#runtime-installation) section above for step-by-step commands.
+The DeepX runtime is not bundled with `ultralytics` and must be installed separately before running inference. On x86-64 Linux machines and ARM64 Debian Trixie machines (Raspberry Pi 5), install the NPU driver (`dxrt-driver-dkms`) and runtime (`libdxrt`) from the DEEPX-AI GitHub releases, then install the bundled `dx_engine` Python wheel. See the [Runtime Installation](#runtime-installation) section above for step-by-step commands.
