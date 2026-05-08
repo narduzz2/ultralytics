@@ -64,6 +64,12 @@ RF_DETR_OBJ365_TOPK_IMGSZ = [
     ("xxl/880", 26.6, {"ap": 60.1, "ap50": 78.5, "ap75": 65.8, "ap_small": 43.7, "ap_medium": 65.1, "ap_large": 76.3}),
 ]
 
+DFINE_DINOV3PLUS_OBJ365_IMGSZ640 = [
+    # T4 TensorRT v10.11, imgsz640 fp16 engine. The paired ~887 ms values are PT latency.
+    ("fp32", 15.0, {"ap": 59.6}, 0.4),
+    ("no-fp32", 14.7, {"ap": 59.2}, 0.4),
+]
+
 BENCHMARKS = {
     "m5": {
         "title": "Object Detection Models: Latency vs mAP (Apple M5 CPU, ONNX)",
@@ -357,6 +363,7 @@ BENCHMARKS = {
             "YOLO26_Dfine (obj365)": [
                 ("xl", 13.1, {"ap": 58.5, "ap50": 75.6, "ap75": 63.9, "ap_small": 43.8, "ap_medium": 62.7, "ap_large": 74.0}, 0.3),
             ],
+            "Dfine_DinoV3Plus (obj365)": DFINE_DINOV3PLUS_OBJ365_IMGSZ640,
             "ConvNeXt D-FINE": [
                 ("t", 11.8, {"ap": 55.1, "ap50": 72.6, "ap75": 60.0, "ap_small": 37.6, "ap_medium": 59.6, "ap_large": 72.8}, 0.2),
                 ("s", 15.1, {"ap": 56.9, "ap50": 74.5, "ap75": 62.1, "ap_small": 40.4, "ap_medium": 61.9, "ap_large": 74.0}, 0.5),
@@ -470,6 +477,7 @@ BENCHMARKS = {
             "YOLO26_Dfine (obj365)": [
                 ("xl", 13.1, {"ap": 58.5, "ap50": 75.6, "ap75": 63.9, "ap_small": 43.8, "ap_medium": 62.7, "ap_large": 74.0}, 0.3),
             ],
+            "Dfine_DinoV3Plus (obj365)": DFINE_DINOV3PLUS_OBJ365_IMGSZ640,
             "ConvNeXt D-FINE": [
                 ("t", 11.8, {"ap": 55.1, "ap50": 72.6, "ap75": 60.0, "ap_small": 37.6, "ap_medium": 59.6, "ap_large": 72.8}, 0.2),
                 ("s", 15.1, {"ap": 56.9, "ap50": 74.5, "ap75": 62.1, "ap_small": 40.4, "ap_medium": 61.9, "ap_large": 74.0}, 0.5),
@@ -521,6 +529,7 @@ MODEL_STYLES = {
     "YOLO26_RTDETR": ("^", -12),
     "YOLO26_RTDETR (obj365)": ("^", 8),
     "YOLO26_Dfine (obj365)": ("D", -12),
+    "Dfine_DinoV3Plus (obj365)": ("X", -16),
     "DINOv3-RTDETR": ("X", 8),
     "DINOv3-RTDETR (obj365)": ("X", -12),
     "DINOv3-STA-RTDETR": ("X", -12),
