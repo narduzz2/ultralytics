@@ -237,7 +237,7 @@ def torch2partner(model, output_dir, metadata, dataset=None, prefix=""):
 - **Minimal Footprint**: keep the number of sub-dependencies as small as possible. Lightweight runtime, lazy loading of heavy components.
 - **No Conflicts**: dependencies must not pin versions that clash with `ultralytics` core requirements.
 - **Cross-platform**: installation should succeed on Linux, macOS, and Windows (or scoped with platform markers when not).
-- **Version Stability**: prefer permissive version bounds — see the [Version pinning](#version-pinning) tip below.
+- **Version Stability**: prefer permissive version bounds — see the version pinning tip below.
 
 #### Adding Optional Dependencies to `pyproject.toml`
 
@@ -749,7 +749,7 @@ Use this checklist as a final review before opening a pull request for a new int
 - [ ] **Error Messages**: Clear, actionable error messages.
 - [ ] **Logging Integration**: Use `LOGGER` from `ultralytics.utils` with a `colorstr("Format:")` prefix; do not use bare `print()`.
 - [ ] **Unit Tests**: Tests added for the export pipeline and runtime backend (see [`tests/`](https://github.com/ultralytics/ultralytics/tree/main/tests) for examples).
-- [ ] **Docstrings**: Google-style docstrings on all public functions and classes (per the [Contributing Guide](../help/contributing.md#-google-style-docstrings)).
+- [ ] **Docstrings**: Google-style docstrings on all public functions and classes (per the [Contributing Guide](../help/contributing.md#google-style-docstrings)).
 
 ## Conclusion
 
