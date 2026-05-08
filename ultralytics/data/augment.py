@@ -975,11 +975,13 @@ class RandomPerspective(BaseTransform):
         pre_transform (Callable | None): Optional transform to apply before the random perspective.
 
     Methods:
-        affine_transform: Apply affine transformations to the input image.
+        get_params: Compute affine transformation matrix and related parameters.
+        apply_image: Warp the image using the affine matrix.
+        apply_instances: Transform bounding boxes, segments, and keypoints.
+        apply_semantic: Placeholder for semantic segmentation mask transformation.
         apply_bboxes: Transform bounding boxes using the affine matrix.
         apply_segments: Transform segments and generate new bounding boxes.
         apply_keypoints: Transform keypoints using the affine matrix.
-        __call__: Apply the random perspective transformation to images and annotations.
         box_candidates: Filter transformed bounding boxes based on size and aspect ratio.
 
     Examples:
@@ -1024,32 +1026,17 @@ class RandomPerspective(BaseTransform):
         self.border = border  # mosaic border
         self.pre_transform = pre_transform
 
-    def affine_transform(self, img: np.ndarray, border: tuple[int, int]) -> tuple[np.ndarray, np.ndarray, float]:
-        """Apply a sequence of affine transformations centered around the image center.
-
-        This function performs a series of geometric transformations on the input image, including translation,
-        perspective change, rotation, scaling, and shearing. The transformations are applied in a specific order to
-        maintain consistency.
+    def _compute_affine_matrix(self, img: np.ndarray) -> tuple[np.ndarray, float]:
+        """Compute the affine transformation matrix without applying it.
 
         Args:
-            img (np.ndarray): Input image to be transformed.
-            border (tuple[int, int]): Border dimensions for the transformed image.
+            img (np.ndarray): Input image used to determine center and dimensions.
 
         Returns:
-            img (np.ndarray): Transformed image.
-            M (np.ndarray): 3x3 transformation matrix.
-            s (float): Scale factor applied during the transformation.
-
-        Examples:
-            >>> import numpy as np
-            >>> img = np.random.rand(100, 100, 3)
-            >>> border = (10, 10)
-            >>> rp = RandomPerspective()
-            >>> transformed_img, matrix, scale = rp.affine_transform(img, border)
+            (M, scale): 3x3 transformation matrix and scale factor.
         """
         # Center
         C = np.eye(3, dtype=np.float32)
-
         C[0, 2] = -img.shape[1] / 2  # x translation (pixels)
         C[1, 2] = -img.shape[0] / 2  # y translation (pixels)
 
@@ -1061,9 +1048,7 @@ class RandomPerspective(BaseTransform):
         # Rotation and Scale
         R = np.eye(3, dtype=np.float32)
         a = random.uniform(-self.degrees, self.degrees)
-        # a += random.choice([-180, -90, 0, 90])  # add 90deg rotations to small rotations
         s = random.uniform(1 - self.scale, 1 + self.scale)
-        # s = 2 ** random.uniform(-scale, scale)
         R[:2] = cv2.getRotationMatrix2D(angle=a, center=(0, 0), scale=s)
 
         # Shear
@@ -1078,15 +1063,90 @@ class RandomPerspective(BaseTransform):
 
         # Combined rotation matrix
         M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
-        # Affine image
+        return M, s
+
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute affine transformation parameters shared across image and instances.
+
+        Args:
+            labels (dict[str, Any]): Input labels dictionary containing 'img'.
+
+        Returns:
+            (dict): Parameters including 'M' (affine matrix), 'scale', 'border', 'orig_shape', and 'size'.
+        """
+        img = labels["img"]
+        border = labels.pop("mosaic_border", self.border)
+        self.size = img.shape[1] + border[1] * 2, img.shape[0] + border[0] * 2  # w, h
+        orig_shape = img.shape[:2]
+        M, scale = self._compute_affine_matrix(img)
+        return {"M": M, "scale": scale, "border": border, "orig_shape": orig_shape, "size": self.size}
+
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply affine warp to the image.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'img'.
+            params (dict | None): Parameters from get_params, including 'M', 'border', and 'size'.
+
+        Returns:
+            (dict): Updated labels with warped image and 'resized_shape'.
+        """
+        img = labels["img"]
+        M = params["M"]
+        border = params["border"]
+        size = params["size"]
         if (border[0] != 0) or (border[1] != 0) or (M != np.eye(3)).any():  # image changed
             if self.perspective:
-                img = cv2.warpPerspective(img, M, dsize=self.size, borderValue=(114, 114, 114))
+                img = cv2.warpPerspective(img, M, dsize=size, borderValue=(114, 114, 114))
             else:  # affine
-                img = cv2.warpAffine(img, M[:2], dsize=self.size, borderValue=(114, 114, 114))
+                img = cv2.warpAffine(img, M[:2], dsize=size, borderValue=(114, 114, 114))
             if img.ndim == 2:
                 img = img[..., None]
-        return img, M, s
+        labels["img"] = img
+        labels["resized_shape"] = img.shape[:2]
+        return labels
+
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply affine transformation to object instances.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'instances' and 'cls'.
+            params (dict | None): Parameters from get_params, including 'M' and 'scale'.
+
+        Returns:
+            (dict): Updated labels with transformed and filtered instances.
+        """
+        cls = labels["cls"]
+        instances = labels.pop("instances")
+        instances.convert_bbox(format="xyxy")
+        instances.denormalize(*params["orig_shape"][::-1])
+
+        M = params["M"]
+        scale = params["scale"]
+
+        bboxes = self.apply_bboxes(instances.bboxes, M)
+
+        segments = instances.segments
+        keypoints = instances.keypoints
+        # Update bboxes if there are segments.
+        if len(segments):
+            bboxes, segments = self.apply_segments(segments, M)
+
+        if keypoints is not None:
+            keypoints = self.apply_keypoints(keypoints, M)
+        new_instances = Instances(bboxes, segments, keypoints, bbox_format="xyxy", normalized=False)
+        # Clip
+        new_instances.clip(*params["size"])
+
+        # Filter instances
+        instances.scale(scale_w=scale, scale_h=scale, bbox_only=True)
+        # Make the bboxes have the same scale with new_bboxes
+        i = self.box_candidates(
+            box1=instances.bboxes.T, box2=new_instances.bboxes.T, area_thr=0.01 if len(segments) else 0.10
+        )
+        labels["instances"] = new_instances[i]
+        labels["cls"] = cls[i]
+        return labels
 
     def apply_bboxes(self, bboxes: np.ndarray, M: np.ndarray) -> np.ndarray:
         """Apply affine transformation to bounding boxes.
@@ -1230,45 +1290,7 @@ class RandomPerspective(BaseTransform):
         if self.pre_transform and "mosaic_border" not in labels:
             labels = self.pre_transform(labels)
         labels.pop("ratio_pad", None)  # do not need ratio pad
-
-        img = labels["img"]
-        cls = labels["cls"]
-        instances = labels.pop("instances")
-        # Make sure the coord formats are right
-        instances.convert_bbox(format="xyxy")
-        instances.denormalize(*img.shape[:2][::-1])
-
-        border = labels.pop("mosaic_border", self.border)
-        self.size = img.shape[1] + border[1] * 2, img.shape[0] + border[0] * 2  # w, h
-        # M is affine matrix
-        # Scale for func:`box_candidates`
-        img, M, scale = self.affine_transform(img, border)
-
-        bboxes = self.apply_bboxes(instances.bboxes, M)
-
-        segments = instances.segments
-        keypoints = instances.keypoints
-        # Update bboxes if there are segments.
-        if len(segments):
-            bboxes, segments = self.apply_segments(segments, M)
-
-        if keypoints is not None:
-            keypoints = self.apply_keypoints(keypoints, M)
-        new_instances = Instances(bboxes, segments, keypoints, bbox_format="xyxy", normalized=False)
-        # Clip
-        new_instances.clip(*self.size)
-
-        # Filter instances
-        instances.scale(scale_w=scale, scale_h=scale, bbox_only=True)
-        # Make the bboxes have the same scale with new_bboxes
-        i = self.box_candidates(
-            box1=instances.bboxes.T, box2=new_instances.bboxes.T, area_thr=0.01 if len(segments) else 0.10
-        )
-        labels["instances"] = new_instances[i]
-        labels["cls"] = cls[i]
-        labels["img"] = img
-        labels["resized_shape"] = img.shape[:2]
-        return labels
+        return super().__call__(labels)
 
     @staticmethod
     def box_candidates(
