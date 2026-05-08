@@ -1026,7 +1026,7 @@ class RandomPerspective(BaseTransform):
         self.border = border  # mosaic border
         self.pre_transform = pre_transform
 
-    def _compute_affine_matrix(self, img: np.ndarray) -> tuple[np.ndarray, float]:
+    def _compute_affine_matrix(self, img: np.ndarray, size: tuple[int, int]) -> tuple[np.ndarray, float]:
         """Compute the affine transformation matrix without applying it.
 
         Args:
@@ -1058,8 +1058,9 @@ class RandomPerspective(BaseTransform):
 
         # Translation
         T = np.eye(3, dtype=np.float32)
-        T[0, 2] = random.uniform(0.5 - self.translate, 0.5 + self.translate) * self.size[0]  # x translation (pixels)
-        T[1, 2] = random.uniform(0.5 - self.translate, 0.5 + self.translate) * self.size[1]  # y translation (pixels)
+
+        T[0, 2] = random.uniform(0.5 - self.translate, 0.5 + self.translate) * size[0]  # x translation (pixels)
+        T[1, 2] = random.uniform(0.5 - self.translate, 0.5 + self.translate) * size[1]  # y translation (pixels)
 
         # Combined rotation matrix
         M = T @ S @ R @ P @ C  # order of operations (right to left) is IMPORTANT
@@ -1076,10 +1077,10 @@ class RandomPerspective(BaseTransform):
         """
         img = labels["img"]
         border = labels.pop("mosaic_border", self.border)
-        self.size = img.shape[1] + border[1] * 2, img.shape[0] + border[0] * 2  # w, h
+        size = img.shape[1] + border[1] * 2, img.shape[0] + border[0] * 2  # w, h
         orig_shape = img.shape[:2]
-        M, scale = self._compute_affine_matrix(img)
-        return {"M": M, "scale": scale, "border": border, "orig_shape": orig_shape, "size": self.size}
+        M, scale = self._compute_affine_matrix(img, size)
+        return {"M": M, "scale": scale, "border": border, "orig_shape": orig_shape, "size": size}
 
     def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Apply affine warp to the image.
@@ -1130,10 +1131,10 @@ class RandomPerspective(BaseTransform):
         keypoints = instances.keypoints
         # Update bboxes if there are segments.
         if len(segments):
-            bboxes, segments = self.apply_segments(segments, M)
+            bboxes, segments = self.apply_segments(segments, M, params["size"])
 
         if keypoints is not None:
-            keypoints = self.apply_keypoints(keypoints, M)
+            keypoints = self.apply_keypoints(keypoints, M, params["size"])
         new_instances = Instances(bboxes, segments, keypoints, bbox_format="xyxy", normalized=False)
         # Clip
         new_instances.clip(*params["size"])
@@ -1182,7 +1183,9 @@ class RandomPerspective(BaseTransform):
         y = xy[:, [1, 3, 5, 7]]
         return np.concatenate((x.min(1), y.min(1), x.max(1), y.max(1)), dtype=bboxes.dtype).reshape(4, n).T
 
-    def apply_segments(self, segments: np.ndarray, M: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def apply_segments(
+        self, segments: np.ndarray, M: np.ndarray, size: tuple[int, int]
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Apply affine transformations to segments and generate new bounding boxes.
 
         This function applies affine transformations to input segments and generates new bounding boxes based on the
@@ -1192,6 +1195,7 @@ class RandomPerspective(BaseTransform):
             segments (np.ndarray): Input segments with shape (N, M, 2), where N is the number of segments and M is the
                 number of points in each segment.
             M (np.ndarray): Affine transformation matrix with shape (3, 3).
+            size (tuple[int, int]): Size of the output image (width, height) used for clipping the segments.
 
         Returns:
             bboxes (np.ndarray): New bounding boxes with shape (N, 4) in xyxy format.
@@ -1213,12 +1217,12 @@ class RandomPerspective(BaseTransform):
         xy = xy @ M.T  # transform
         xy = xy[:, :2] / xy[:, 2:3]
         segments = xy.reshape(n, -1, 2)
-        bboxes = np.stack([segment2box(xy, self.size[0], self.size[1]) for xy in segments], 0)
+        bboxes = np.stack([segment2box(xy, size[0], size[1]) for xy in segments], 0)
         segments[..., 0] = segments[..., 0].clip(bboxes[:, 0:1], bboxes[:, 2:3])
         segments[..., 1] = segments[..., 1].clip(bboxes[:, 1:2], bboxes[:, 3:4])
         return bboxes, segments
 
-    def apply_keypoints(self, keypoints: np.ndarray, M: np.ndarray) -> np.ndarray:
+    def apply_keypoints(self, keypoints: np.ndarray, M: np.ndarray, size: tuple[int, int]) -> np.ndarray:
         """Apply affine transformation to keypoints.
 
         This method transforms the input keypoints using the provided affine transformation matrix. It handles
@@ -1229,6 +1233,7 @@ class RandomPerspective(BaseTransform):
             keypoints (np.ndarray): Array of keypoints with shape (N, K, 3), where N is the number of instances, K is
                 the number of keypoints per instance, and 3 represents (x, y, visibility).
             M (np.ndarray): 3x3 affine transformation matrix.
+            size (tuple[int, int]): Size of the output image (width, height) used to determine visibility of keypoints.
 
         Returns:
             (np.ndarray): Transformed keypoints array with the same shape as input (N, K, 3).
@@ -1247,7 +1252,7 @@ class RandomPerspective(BaseTransform):
         xy[:, :2] = keypoints[..., :2].reshape(n * nkpt, 2)
         xy = xy @ M.T  # transform
         xy = xy[:, :2] / xy[:, 2:3]  # perspective rescale or affine
-        out_mask = (xy[:, 0] < 0) | (xy[:, 1] < 0) | (xy[:, 0] > self.size[0]) | (xy[:, 1] > self.size[1])
+        out_mask = (xy[:, 0] < 0) | (xy[:, 1] < 0) | (xy[:, 0] > size[0]) | (xy[:, 1] > size[1])
         visible[out_mask] = 0
         return np.concatenate([xy, visible], axis=-1).reshape(n, nkpt, 3)
 
