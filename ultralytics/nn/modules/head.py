@@ -1819,10 +1819,7 @@ class SemanticSegment(nn.Module):
         export (bool): Export mode flag.
     """
 
-    dynamic = False
-    export = False
-    format = None
-    shape = None
+    export = False  # export mode
 
     def __init__(self, nc=19, ch=()):
         """Initialize the semantic segmentation head.
