@@ -234,8 +234,8 @@ class AIFI(TransformerEncoderLayer):
         omega = torch.arange(pos_dim, dtype=torch.float32) / pos_dim
         omega = 1.0 / (temperature**omega)
 
-        out_w = grid_w.flatten()[..., None] @ omega[None]
-        out_h = grid_h.flatten()[..., None] @ omega[None]
+        out_w = grid_w.flatten()[..., None].float() @ omega[None]
+        out_h = grid_h.flatten()[..., None].float() @ omega[None]
 
         return torch.cat([torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], 1)[None]
 
