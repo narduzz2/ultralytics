@@ -278,14 +278,14 @@ class BaseMixTransform(BaseTransform):
 
     Methods:
         __call__: Apply the mix transformation to the input labels.
-        _mix_transform: Abstract method to be implemented by subclasses for specific mix operations.
+        get_params: Prepare mixed labels and update text labels.
         get_indexes: Abstract method to get indexes of images to be mixed.
         _update_label_text: Update label text for mixed images.
 
     Examples:
         >>> class CustomMixTransform(BaseMixTransform):
-        ...     def _mix_transform(self, labels):
-        ...         # Implement custom mix logic here
+        ...     def apply_image(self, labels, params=None):
+        ...         # Implement custom image mixing here
         ...         return labels
         ...
         ...     def get_indexes(self):
@@ -328,6 +328,22 @@ class BaseMixTransform(BaseTransform):
         if random.uniform(0, 1) > self.p:
             return labels
 
+        params = self.get_params(labels)
+        labels = self.apply_image(labels, params)
+        labels = self.apply_instances(labels, params)
+        labels = self.apply_semantic(labels, params)
+        labels.pop("mix_labels", None)
+        return labels
+
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Prepare mixed labels and update text labels.
+
+        Args:
+            labels (dict[str, Any]): A dictionary containing label data for an image.
+
+        Returns:
+            (dict[str, Any]): Parameters for apply_image, apply_instances, and apply_semantic.
+        """
         # Get index of one or three other images
         indexes = self.get_indexes()
         if isinstance(indexes, int):
@@ -342,31 +358,8 @@ class BaseMixTransform(BaseTransform):
         labels["mix_labels"] = mix_labels
 
         # Update cls and texts
-        labels = self._update_label_text(labels)
-        # Mosaic, CutMix or MixUp
-        labels = self._mix_transform(labels)
-        labels.pop("mix_labels", None)
-        return labels
-
-    def _mix_transform(self, labels: dict[str, Any]):
-        """Apply CutMix, MixUp or Mosaic augmentation to the label dictionary.
-
-        This method should be implemented by subclasses to perform specific mix transformations like CutMix, MixUp or
-        Mosaic. It modifies the input label dictionary in-place with the augmented data.
-
-        Args:
-            labels (dict[str, Any]): A dictionary containing image and label data. Expected to have a 'mix_labels' key
-                with a list of additional image and label data for mixing.
-
-        Returns:
-            (dict[str, Any]): The modified labels dictionary with augmented data after applying the mix transform.
-
-        Examples:
-            >>> transform = BaseMixTransform(dataset)
-            >>> labels = {"image": img, "bboxes": boxes, "mix_labels": [{"image": img2, "bboxes": boxes2}]}
-            >>> augmented_labels = transform._mix_transform(labels)
-        """
-        raise NotImplementedError
+        self._update_label_text(labels)
+        return {"mix_labels": mix_labels}
 
     def get_indexes(self):
         """Get a random index for mosaic augmentation.
@@ -441,10 +434,9 @@ class Mosaic(BaseMixTransform):
 
     Methods:
         get_indexes: Return a list of random indexes from the dataset.
-        _mix_transform: Apply mosaic transformation to the input image and labels.
-        _mosaic3: Create a 1x3 image mosaic.
-        _mosaic4: Create a 2x2 image mosaic.
-        _mosaic9: Create a 3x3 image mosaic.
+        get_params: Compute mosaic layout parameters.
+        apply_image: Allocate canvas and paste images into mosaic.
+        apply_instances: Concatenate and clip instances for mosaic.
         _update_labels: Update labels with padding.
         _cat_labels: Concatenate labels and clips mosaic border instances.
 
@@ -495,222 +487,161 @@ class Mosaic(BaseMixTransform):
         else:  # select any images
             return [random.randint(0, len(self.dataset) - 1) for _ in range(self.n - 1)]
 
-    def _mix_transform(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Apply mosaic augmentation to the input image and labels.
-
-        This method combines multiple images (3, 4, or 9) into a single mosaic image based on the 'n' attribute. It
-        ensures that rectangular annotations are not present and that there are other images available for mosaic
-        augmentation.
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute mosaic layout parameters.
 
         Args:
-            labels (dict[str, Any]): A dictionary containing image data and annotations. Expected keys include:
-                - 'rect_shape': Should be None as rect and mosaic are mutually exclusive.
-                - 'mix_labels': A list of dictionaries containing data for other images to be used in the mosaic.
+            labels (dict[str, Any]): Input labels dictionary.
 
         Returns:
-            (dict[str, Any]): A dictionary containing the mosaic-augmented image and updated annotations.
-
-        Raises:
-            AssertionError: If 'rect_shape' is not None or if 'mix_labels' is empty.
-
-        Examples:
-            >>> mosaic = Mosaic(dataset, imgsz=640, p=1.0, n=4)
-            >>> augmented_data = mosaic._mix_transform(labels)
+            (dict[str, Any]): Parameters including 'layout' with per-patch geometry.
         """
+        params = super().get_params(labels)
         assert labels.get("rect_shape") is None, "rect and mosaic are mutually exclusive."
         assert len(labels.get("mix_labels", [])), "There are no other images for mosaic augment."
-        return (
-            self._mosaic3(labels) if self.n == 3 else self._mosaic4(labels) if self.n == 4 else self._mosaic9(labels)
-        )  # This code is modified for mosaic3 method.
 
-    def _mosaic3(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Create a 1x3 image mosaic by combining three images.
+        s = self.imgsz
+        layout = []
+        if self.n == 4:
+            yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.border)
+            for i in range(4):
+                labels_patch = labels if i == 0 else labels["mix_labels"][i - 1]
+                img = labels_patch["img"]
+                h, w = labels_patch.get("resized_shape", img.shape[:2])
+                if i == 0:  # top left
+                    x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc
+                    x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h
+                elif i == 1:  # top right
+                    x1a, y1a, x2a, y2a = xc, max(yc - h, 0), min(xc + w, s * 2), yc
+                    x1b, y1b, x2b, y2b = 0, h - (y2a - y1a), min(w, x2a - x1a), h
+                elif i == 2:  # bottom left
+                    x1a, y1a, x2a, y2a = max(xc - w, 0), yc, xc, min(s * 2, yc + h)
+                    x1b, y1b, x2b, y2b = w - (x2a - x1a), 0, w, min(y2a - y1a, h)
+                elif i == 3:  # bottom right
+                    x1a, y1a, x2a, y2a = xc, yc, min(xc + w, s * 2), min(s * 2, yc + h)
+                    x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
+                padw = x1a - x1b
+                padh = y1a - y1b
+                layout.append(
+                    {
+                        "labels_patch": labels_patch,
+                        "x1a": x1a,
+                        "y1a": y1a,
+                        "x2a": x2a,
+                        "y2a": y2a,
+                        "x1b": x1b,
+                        "y1b": y1b,
+                        "x2b": x2b,
+                        "y2b": y2b,
+                        "padw": padw,
+                        "padh": padh,
+                        "img_shape": (h, w),
+                    }
+                )
+        elif self.n == 9:
+            hp, wp = -1, -1
+            h0, w0 = None, None
+            for i in range(9):
+                labels_patch = labels if i == 0 else labels["mix_labels"][i - 1]
+                img = labels_patch["img"]
+                h, w = labels_patch.get("resized_shape", img.shape[:2])
+                if i == 0:  # center
+                    c = s, s, s + w, s + h
+                    h0, w0 = h, w
+                elif i == 1:  # top
+                    c = s, s - h, s + w, s
+                elif i == 2:  # top right
+                    c = s + wp, s - h, s + wp + w, s
+                elif i == 3:  # right
+                    c = s + w0, s, s + w0 + w, s + h
+                elif i == 4:  # bottom right
+                    c = s + w0, s + hp, s + w0 + w, s + hp + h
+                elif i == 5:  # bottom
+                    c = s + w0 - w, s + h0, s + w0, s + h0 + h
+                elif i == 6:  # bottom left
+                    c = s + w0 - wp - w, s + h0, s + w0 - wp, s + h0 + h
+                elif i == 7:  # left
+                    c = s - w, s + h0 - h, s, s + h0
+                elif i == 8:  # top left
+                    c = s - w, s + h0 - hp - h, s, s + h0 - hp
+                padw, padh = c[:2]
+                x1, y1, x2, y2 = (max(x, 0) for x in c)
+                layout.append(
+                    {
+                        "labels_patch": labels_patch,
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": y2,
+                        "padw": padw,
+                        "padh": padh,
+                        "img_shape": (h, w),
+                    }
+                )
+                hp, wp = h, w
+        params["layout"] = layout
+        return params
 
-        This method arranges three images in a horizontal layout, with the main image in the center and two additional
-        images on either side. It's part of the Mosaic augmentation technique used in object detection.
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply mosaic augmentation to the image.
 
         Args:
-            labels (dict[str, Any]): A dictionary containing image and label information for the main (center) image.
-                Must include 'img' key with the image array, and 'mix_labels' key with a list of two dictionaries
-                containing information for the side images.
+            labels (dict[str, Any]): Dictionary containing 'img'.
+            params (dict | None): Parameters from get_params, including 'layout'.
 
         Returns:
-            (dict[str, Any]): A dictionary with the mosaic image and updated labels. Keys include:
-                - 'img' (np.ndarray): The mosaic image array with shape (H, W, C).
-                - Other keys from the input labels, updated to reflect the new image dimensions.
-
-        Examples:
-            >>> mosaic = Mosaic(dataset, imgsz=640, p=1.0, n=3)
-            >>> labels = {
-            ...     "img": np.random.rand(480, 640, 3),
-            ...     "mix_labels": [{"img": np.random.rand(480, 640, 3)} for _ in range(2)],
-            ... }
-            >>> result = mosaic._mosaic3(labels)
-            >>> print(result["img"].shape)
-            (640, 640, 3)
+            (dict): Updated labels with mosaic image.
         """
-        mosaic_labels = []
         s = self.imgsz
-        for i in range(3):
-            labels_patch = labels if i == 0 else labels["mix_labels"][i - 1]
-            # Load image
-            img = labels_patch["img"]
-            h, w = labels_patch.pop("resized_shape")
+        layout = params["layout"]
+        if self.n == 4:
+            img4 = np.full((s * 2, s * 2, labels["img"].shape[2]), 114, dtype=np.uint8)
+            for item in layout:
+                labels_patch = item["labels_patch"]
+                img = labels_patch["img"]
+                x1a, y1a, x2a, y2a = item["x1a"], item["y1a"], item["x2a"], item["y2a"]
+                x1b, y1b, x2b, y2b = item["x1b"], item["y1b"], item["x2b"], item["y2b"]
+                img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]
+            labels["img"] = img4
+        elif self.n == 9:
+            img9 = np.full((s * 3, s * 3, labels["img"].shape[2]), 114, dtype=np.uint8)
+            for item in layout:
+                labels_patch = item["labels_patch"]
+                img = labels_patch["img"]
+                x1, y1, x2, y2 = item["x1"], item["y1"], item["x2"], item["y2"]
+                padw, padh = item["padw"], item["padh"]
+                img9[y1:y2, x1:x2] = img[y1 - padh :, x1 - padw :]
+            labels["img"] = img9[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
+        return labels
 
-            # Place img in img3
-            if i == 0:  # center
-                img3 = np.full((s * 3, s * 3, img.shape[2]), 114, dtype=np.uint8)  # base image with 3 tiles
-                h0, w0 = h, w
-                c = s, s, s + w, s + h  # xmin, ymin, xmax, ymax (base) coordinates
-            elif i == 1:  # right
-                c = s + w0, s, s + w0 + w, s + h
-            elif i == 2:  # left
-                c = s - w, s + h0 - h, s, s + h0
-
-            padw, padh = c[:2]
-            x1, y1, x2, y2 = (max(x, 0) for x in c)  # allocate coordinates
-
-            img3[y1:y2, x1:x2] = img[y1 - padh :, x1 - padw :]  # img3[ymin:ymax, xmin:xmax]
-            # hp, wp = h, w  # height, width previous for next iteration
-
-            # Labels assuming imgsz*2 mosaic size
-            labels_patch = self._update_labels(labels_patch, padw + self.border[0], padh + self.border[1])
-            mosaic_labels.append(labels_patch)
-        final_labels = self._cat_labels(mosaic_labels)
-
-        final_labels["img"] = img3[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
-        return final_labels
-
-    def _mosaic4(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Create a 2x2 image mosaic from four input images.
-
-        This method combines four images into a single mosaic image by placing them in a 2x2 grid. It also updates the
-        corresponding labels for each image in the mosaic.
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply mosaic augmentation to instances.
 
         Args:
-            labels (dict[str, Any]): A dictionary containing image data and labels for the base image (index 0) and
-                three additional images (indices 1-3) in the 'mix_labels' key.
+            labels (dict[str, Any]): Dictionary containing 'instances' and 'cls'.
+            params (dict | None): Parameters from get_params, including 'layout'.
 
         Returns:
-            (dict[str, Any]): A dictionary containing the mosaic image and updated labels. The 'img' key contains the
-                mosaic image as a numpy array, and other keys contain the combined and adjusted labels for all
-                four images.
-
-        Examples:
-            >>> mosaic = Mosaic(dataset, imgsz=640, p=1.0, n=4)
-            >>> labels = {
-            ...     "img": np.random.rand(480, 640, 3),
-            ...     "mix_labels": [{"img": np.random.rand(480, 640, 3)} for _ in range(3)],
-            ... }
-            >>> result = mosaic._mosaic4(labels)
-            >>> assert result["img"].shape == (1280, 1280, 3)
+            (dict): Updated labels with concatenated instances.
         """
+        layout = params["layout"]
         mosaic_labels = []
-        s = self.imgsz
-        yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.border)  # mosaic center x, y
-        for i in range(4):
-            labels_patch = labels if i == 0 else labels["mix_labels"][i - 1]
-            # Load image
-            img = labels_patch["img"]
-            h, w = labels_patch.pop("resized_shape")
-
-            # Place img in img4
-            if i == 0:  # top left
-                img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
-                x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
-                x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
-            elif i == 1:  # top right
-                x1a, y1a, x2a, y2a = xc, max(yc - h, 0), min(xc + w, s * 2), yc
-                x1b, y1b, x2b, y2b = 0, h - (y2a - y1a), min(w, x2a - x1a), h
-            elif i == 2:  # bottom left
-                x1a, y1a, x2a, y2a = max(xc - w, 0), yc, xc, min(s * 2, yc + h)
-                x1b, y1b, x2b, y2b = w - (x2a - x1a), 0, w, min(y2a - y1a, h)
-            elif i == 3:  # bottom right
-                x1a, y1a, x2a, y2a = xc, yc, min(xc + w, s * 2), min(s * 2, yc + h)
-                x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
-
-            img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
-            padw = x1a - x1b
-            padh = y1a - y1b
-
-            labels_patch = self._update_labels(labels_patch, padw, padh)
+        for item in layout:
+            labels_patch = deepcopy(item["labels_patch"])
+            if self.n == 4:
+                padw = item["padw"]
+                padh = item["padh"]
+            else:  # n == 9
+                padw = item["padw"] + self.border[0]
+                padh = item["padh"] + self.border[1]
+            labels_patch = self._update_labels(labels_patch, padw, padh, item.get("img_shape"))
             mosaic_labels.append(labels_patch)
         final_labels = self._cat_labels(mosaic_labels)
-        final_labels["img"] = img4
-        return final_labels
-
-    def _mosaic9(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Create a 3x3 image mosaic from the input image and eight additional images.
-
-        This method combines nine images into a single mosaic image. The input image is placed at the center, and eight
-        additional images from the dataset are placed around it in a 3x3 grid pattern.
-
-        Args:
-            labels (dict[str, Any]): A dictionary containing the input image and its associated labels. It should have
-                the following keys: 'img' (np.ndarray) the input image, 'resized_shape' (tuple[int, int]) the shape
-                of the resized image (height, width), and 'mix_labels' (list[dict]) a list of dictionaries containing
-                information for the additional eight images, each with the same structure as the input labels.
-
-        Returns:
-            (dict[str, Any]): A dictionary containing the mosaic image and updated labels. It includes the following
-            keys:
-                - 'img' (np.ndarray): The final mosaic image.
-                - Other keys from the input labels, updated to reflect the new mosaic arrangement.
-
-        Examples:
-            >>> mosaic = Mosaic(dataset, imgsz=640, p=1.0, n=9)
-            >>> input_labels = dataset[0]
-            >>> mosaic_result = mosaic._mosaic9(input_labels)
-            >>> mosaic_image = mosaic_result["img"]
-        """
-        mosaic_labels = []
-        s = self.imgsz
-        hp, wp = -1, -1  # height, width previous
-        for i in range(9):
-            labels_patch = labels if i == 0 else labels["mix_labels"][i - 1]
-            # Load image
-            img = labels_patch["img"]
-            h, w = labels_patch.pop("resized_shape")
-
-            # Place img in img9
-            if i == 0:  # center
-                img9 = np.full((s * 3, s * 3, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
-                h0, w0 = h, w
-                c = s, s, s + w, s + h  # xmin, ymin, xmax, ymax (base) coordinates
-            elif i == 1:  # top
-                c = s, s - h, s + w, s
-            elif i == 2:  # top right
-                c = s + wp, s - h, s + wp + w, s
-            elif i == 3:  # right
-                c = s + w0, s, s + w0 + w, s + h
-            elif i == 4:  # bottom right
-                c = s + w0, s + hp, s + w0 + w, s + hp + h
-            elif i == 5:  # bottom
-                c = s + w0 - w, s + h0, s + w0, s + h0 + h
-            elif i == 6:  # bottom left
-                c = s + w0 - wp - w, s + h0, s + w0 - wp, s + h0 + h
-            elif i == 7:  # left
-                c = s - w, s + h0 - h, s, s + h0
-            elif i == 8:  # top left
-                c = s - w, s + h0 - hp - h, s, s + h0 - hp
-
-            padw, padh = c[:2]
-            x1, y1, x2, y2 = (max(x, 0) for x in c)  # allocate coordinates
-
-            # Image
-            img9[y1:y2, x1:x2] = img[y1 - padh :, x1 - padw :]  # img9[ymin:ymax, xmin:xmax]
-            hp, wp = h, w  # height, width previous for next iteration
-
-            # Labels assuming imgsz*2 mosaic size
-            labels_patch = self._update_labels(labels_patch, padw + self.border[0], padh + self.border[1])
-            mosaic_labels.append(labels_patch)
-        final_labels = self._cat_labels(mosaic_labels)
-
-        final_labels["img"] = img9[-self.border[0] : self.border[0], -self.border[1] : self.border[1]]
-        return final_labels
+        labels.update(final_labels)
+        return labels
 
     @staticmethod
-    def _update_labels(labels, padw: int, padh: int) -> dict[str, Any]:
+    def _update_labels(labels, padw: int, padh: int, img_shape: tuple[int, int] | None = None) -> dict[str, Any]:
         """Update label coordinates with padding values.
 
         This method adjusts the bounding box coordinates of object instances in the labels by adding padding
@@ -720,6 +651,9 @@ class Mosaic(BaseMixTransform):
             labels (dict[str, Any]): A dictionary containing image and instance information.
             padw (int): Padding width to be added to the x-coordinates.
             padh (int): Padding height to be added to the y-coordinates.
+            img_shape (tuple[int, int] | None): Optional (h, w) of the original patch image. If None, uses
+                labels["img"].shape[:2]. Needed because apply_image may overwrite labels["img"] with the mosaic
+                canvas before apply_instances runs.
 
         Returns:
             (dict): Updated labels dictionary with adjusted instance coordinates.
@@ -729,7 +663,7 @@ class Mosaic(BaseMixTransform):
             >>> padw, padh = 50, 50
             >>> updated_labels = Mosaic._update_labels(labels, padw, padh)
         """
-        nh, nw = labels["img"].shape[:2]
+        nh, nw = img_shape if img_shape is not None else labels["img"].shape[:2]
         labels["instances"].convert_bbox(format="xyxy")
         labels["instances"].denormalize(nw, nh)
         labels["instances"].add_padding(padw, padh)
@@ -798,7 +732,9 @@ class MixUp(BaseMixTransform):
         p (float): Probability of applying MixUp augmentation.
 
     Methods:
-        _mix_transform: Apply MixUp augmentation to the input labels.
+        get_params: Compute MixUp parameters including blend ratio.
+        apply_image: Blend images using MixUp.
+        apply_instances: Concatenate instances for MixUp.
 
     Examples:
         >>> from ultralytics.data.augment import MixUp
@@ -820,25 +756,45 @@ class MixUp(BaseMixTransform):
         """
         super().__init__(dataset=dataset, pre_transform=pre_transform, p=p)
 
-    def _mix_transform(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Apply MixUp augmentation to the input labels.
-
-        This method implements the MixUp augmentation technique as described in the paper "mixup: Beyond Empirical Risk
-        Minimization" (https://arxiv.org/abs/1710.09412).
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute MixUp parameters.
 
         Args:
-            labels (dict[str, Any]): A dictionary containing the original image and label information.
+            labels (dict[str, Any]): Input labels dictionary.
 
         Returns:
-            (dict[str, Any]): A dictionary containing the mixed-up image and combined label information.
-
-        Examples:
-            >>> mixer = MixUp(dataset)
-            >>> mixed_labels = mixer._mix_transform(labels)
+            (dict[str, Any]): Parameters including mix ratio 'r'.
         """
-        r = np.random.beta(32.0, 32.0)  # mixup ratio, alpha=beta=32.0
+        params = super().get_params(labels)
+        params["r"] = np.random.beta(32.0, 32.0)
+        return params
+
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Blend images using MixUp.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'img'.
+            params (dict | None): Parameters from get_params, including 'r'.
+
+        Returns:
+            (dict): Updated labels with blended image.
+        """
+        r = params["r"]
         labels2 = labels["mix_labels"][0]
         labels["img"] = (labels["img"] * r + labels2["img"] * (1 - r)).astype(np.uint8)
+        return labels
+
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Concatenate instances for MixUp.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'instances' and 'cls'.
+            params (dict | None): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with concatenated instances.
+        """
+        labels2 = labels["mix_labels"][0]
         labels["instances"] = Instances.concatenate([labels["instances"], labels2["instances"]], axis=0)
         labels["cls"] = np.concatenate([labels["cls"], labels2["cls"]], 0)
         return labels
@@ -858,7 +814,9 @@ class CutMix(BaseMixTransform):
         num_areas (int): Number of areas to try to cut and mix.
 
     Methods:
-        _mix_transform: Apply CutMix augmentation to the input labels.
+        get_params: Compute CutMix parameters including cut area and filtered indexes.
+        apply_image: Copy patch from secondary image into primary image.
+        apply_instances: Clip and concatenate instances for CutMix.
         _rand_bbox: Generate random bounding box coordinates for the cut region.
 
     Examples:
@@ -911,44 +869,78 @@ class CutMix(BaseMixTransform):
 
         return x1, y1, x2, y2
 
-    def _mix_transform(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Apply CutMix augmentation to the input labels.
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute CutMix parameters.
 
         Args:
-            labels (dict[str, Any]): A dictionary containing the original image and label information.
+            labels (dict[str, Any]): Input labels dictionary.
 
         Returns:
-            (dict[str, Any]): A dictionary containing the mixed image and adjusted labels.
-
-        Examples:
-            >>> cutter = CutMix(dataset)
-            >>> mixed_labels = cutter._mix_transform(labels)
+            (dict[str, Any]): Parameters including 'skip', 'area', and 'indexes2'.
         """
-        # Get a random second image
+        params = super().get_params(labels)
         h, w = labels["img"].shape[:2]
 
         cut_areas = np.asarray([self._rand_bbox(w, h) for _ in range(self.num_areas)], dtype=np.float32)
         ioa1 = bbox_ioa(cut_areas, labels["instances"].bboxes)  # (self.num_areas, num_boxes)
         idx = np.nonzero(ioa1.sum(axis=1) <= 0)[0]
         if len(idx) == 0:
-            return labels
+            params["skip"] = True
+            return params
 
-        labels2 = labels.pop("mix_labels")[0]
+        labels2 = labels["mix_labels"][0]
         area = cut_areas[np.random.choice(idx)]  # randomly select one
         ioa2 = bbox_ioa(area[None], labels2["instances"].bboxes).squeeze(0)
         indexes2 = np.nonzero(ioa2 >= (0.01 if len(labels["instances"].segments) else 0.1))[0]
         if len(indexes2) == 0:
+            params["skip"] = True
+            return params
+
+        params["area"] = area
+        params["indexes2"] = indexes2
+        params["w"] = w
+        params["h"] = h
+        return params
+
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply CutMix to the image.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'img'.
+            params (dict | None): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with mixed image.
+        """
+        if params.get("skip"):
             return labels
+        x1, y1, x2, y2 = params["area"].astype(np.int32)
+        labels2 = labels["mix_labels"][0]
+        labels["img"][y1:y2, x1:x2] = labels2["img"][y1:y2, x1:x2]
+        return labels
+
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply CutMix to instances.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'instances' and 'cls'.
+            params (dict | None): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with mixed instances.
+        """
+        if params.get("skip"):
+            return labels
+        labels2 = labels["mix_labels"][0]
+        w, h = params["w"], params["h"]
+        area = params["area"]
+        indexes2 = params["indexes2"]
 
         instances2 = labels2["instances"][indexes2]
         instances2.convert_bbox("xyxy")
         instances2.denormalize(w, h)
 
-        # Apply CutMix
         x1, y1, x2, y2 = area.astype(np.int32)
-        labels["img"][y1:y2, x1:x2] = labels2["img"][y1:y2, x1:x2]
-
-        # Restrain instances2 to the random bounding border
         instances2.add_padding(-x1, -y1)
         instances2.clip(x2 - x1, y2 - y1)
         instances2.add_padding(x1, y1)
@@ -1379,7 +1371,7 @@ class RandomHSV(BaseTransform):
         self.sgain = sgain
         self.vgain = vgain
 
-    def apply_image(self, labels, params=None):
+    def apply_image(self, labels, params: dict = None):
         """Apply random HSV augmentation to an image within predefined limits.
 
         This method modifies the input image by randomly adjusting its Hue, Saturation, and Value (HSV) channels. The
@@ -1686,8 +1678,9 @@ class CopyPaste(BaseMixTransform):
         p (float): Probability of applying Copy-Paste augmentation.
 
     Methods:
-        _mix_transform: Apply Copy-Paste augmentation to the input labels.
-        __call__: Apply the Copy-Paste transformation to images and annotations.
+        get_params: Compute CopyPaste parameters including selected instances and mask.
+        apply_image: Draw contours and paste pixels for CopyPaste.
+        apply_instances: Concatenate selected instances for CopyPaste.
 
     Examples:
         >>> from ultralytics.data.augment import CopyPaste
@@ -1702,74 +1695,116 @@ class CopyPaste(BaseMixTransform):
         assert mode in {"flip", "mixup"}, f"Expected `mode` to be `flip` or `mixup`, but got {mode}."
         self.mode = mode
 
-    def _mix_transform(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Apply Copy-Paste augmentation to combine objects from another image into the current image."""
-        labels2 = labels["mix_labels"][0]
-        return self._transform(labels, labels2)
-
     def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
         """Apply Copy-Paste augmentation to an image and its labels."""
         if len(labels["instances"].segments) == 0 or self.p == 0:
             return labels
         if self.mode == "flip":
-            return self._transform(labels)
+            params = self.get_params(labels)
+            labels = self.apply_image(labels, params)
+            labels = self.apply_instances(labels, params)
+            labels = self.apply_semantic(labels, params)
+            return labels
+        return super().__call__(labels)
 
-        # Get index of one or three other images
-        indexes = self.get_indexes()
-        if isinstance(indexes, int):
-            indexes = [indexes]
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute CopyPaste parameters.
 
-        # Get images information will be used for Mosaic or MixUp
-        mix_labels = [self.dataset.get_image_and_label(i) for i in indexes]
+        Args:
+            labels (dict[str, Any]): Input labels dictionary.
 
-        if self.pre_transform is not None:
-            for i, data in enumerate(mix_labels):
-                mix_labels[i] = self.pre_transform(data)
-        labels["mix_labels"] = mix_labels
+        Returns:
+            (dict[str, Any]): Parameters including 'instances2', 'selected', and 'im_new'.
+        """
+        params = {}
+        if self.mode == "mixup":
+            params = super().get_params(labels)
+            labels2 = labels.get("mix_labels", [{}])[0]
+        else:
+            labels2 = {}
 
-        # Update cls and texts
-        labels = self._update_label_text(labels)
-        # Mosaic or MixUp
-        labels = self._mix_transform(labels)
-        labels.pop("mix_labels", None)
-        return labels
-
-    def _transform(self, labels1: dict[str, Any], labels2: dict[str, Any] = {}) -> dict[str, Any]:
-        """Apply Copy-Paste augmentation to combine objects from another image into the current image."""
-        im = labels1["img"]
-        if "mosaic_border" not in labels1:
-            im = im.copy()  # avoid modifying original non-mosaic image
-        cls = labels1["cls"]
-        h, w = im.shape[:2]
-        instances = labels1.pop("instances")
+        h, w = labels["img"].shape[:2]
+        instances = deepcopy(labels["instances"])
         instances.convert_bbox(format="xyxy")
         instances.denormalize(w, h)
 
-        im_new = np.zeros(im.shape[:2], np.uint8)
-        instances2 = labels2.pop("instances", None)
+        instances2 = deepcopy(labels2.get("instances")) if labels2 else None
         if instances2 is None:
             instances2 = deepcopy(instances)
             instances2.fliplr(w)
-        ioa = bbox_ioa(instances2.bboxes, instances.bboxes)  # intersection over area, (N, M)
-        indexes = np.nonzero((ioa < 0.30).all(1))[0]  # (N, )
+
+        ioa = bbox_ioa(instances2.bboxes, instances.bboxes)
+        indexes = np.nonzero((ioa < 0.30).all(1))[0]
         n = len(indexes)
         sorted_idx = np.argsort(ioa.max(1)[indexes])
         indexes = indexes[sorted_idx]
-        for j in indexes[: round(self.p * n)]:
-            cls = np.concatenate((cls, labels2.get("cls", cls)[[j]]), axis=0)
-            instances = Instances.concatenate((instances, instances2[[j]]), axis=0)
+        selected = indexes[: round(self.p * n)]
+
+        im_new = np.zeros((h, w), np.uint8)
+
+        params["instances"] = instances
+        params["instances2"] = instances2
+        params["selected"] = selected
+        params["im_new"] = im_new
+        params["labels2_cls"] = labels2.get("cls")
+        params["labels2_img"] = labels2.get("img")
+        return params
+
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply CopyPaste to the image.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'img'.
+            params (dict | None): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with pasted objects.
+        """
+        im = labels["img"]
+        if "mosaic_border" not in labels:
+            im = im.copy()
+
+        instances2 = params["instances2"]
+        selected = params["selected"]
+        im_new = params["im_new"]
+
+        for j in selected:
             cv2.drawContours(im_new, instances2.segments[[j]].astype(np.int32), -1, 1, cv2.FILLED)
 
-        result = labels2.get("img", cv2.flip(im, 1))  # augment segments
-        if result.ndim == 2:  # cv2.flip would eliminate the last dimension for grayscale images
+        result = params.get("labels2_img")
+        if result is None:
+            result = cv2.flip(im, 1)
+        if result.ndim == 2:
             result = result[..., None]
+
         i = im_new.astype(bool)
         im[i] = result[i]
+        labels["img"] = im
+        return labels
 
-        labels1["img"] = im
-        labels1["cls"] = cls
-        labels1["instances"] = instances
-        return labels1
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Apply CopyPaste to instances.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'instances' and 'cls'.
+            params (dict | None): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with concatenated instances.
+        """
+        instances = params["instances"]
+        instances2 = params["instances2"]
+        selected = params["selected"]
+        cls = labels["cls"]
+        labels2_cls = params.get("labels2_cls")
+
+        for j in selected:
+            cls = np.concatenate((cls, (labels2_cls if labels2_cls is not None else cls)[[j]]), axis=0)
+            instances = Instances.concatenate((instances, instances2[[j]]), axis=0)
+
+        labels["cls"] = cls
+        labels["instances"] = instances
+        return labels
 
 
 class Albumentations(BaseTransform):
@@ -2207,6 +2242,8 @@ class LoadVisualPrompt(BaseTransform):
         if "bboxes" in labels:
             bboxes = labels["bboxes"]
             bboxes = xywh2xyxy(bboxes) * torch.tensor(imgsz)[[1, 0, 1, 0]]  # denormalize boxes
+        elif "masks" in labels:
+            masks = labels["masks"]
 
         cls = labels["cls"].squeeze(-1).to(torch.int)
         visuals = self.get_visuals(cls, imgsz, bboxes=bboxes, masks=masks)
