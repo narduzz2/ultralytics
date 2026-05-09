@@ -28,10 +28,10 @@ DEFAULT_STD = (1.0, 1.0, 1.0)
 class BaseTransform:
     """Base class for image transformations in the Ultralytics library.
 
-    This class provides a unified interface for applying transformations to images, object instances,
-    and semantic segmentation masks. Subclasses should override `apply_image`, `apply_instances`,
-    and/or `apply_semantic` for simple transforms, or override `__call__` directly for complex
-    transforms that need shared state between image and annotation modifications.
+    This class provides a unified interface for applying transformations to images, object instances, and semantic
+    segmentation masks. Subclasses should override `apply_image`, `apply_instances`, and/or `apply_semantic` for simple
+    transforms, or override `__call__` directly for complex transforms that need shared state between image and
+    annotation modifications.
 
     Methods:
         get_params: Compute transformation parameters shared across image, instances, and semantic mask.
@@ -652,8 +652,8 @@ class Mosaic(BaseMixTransform):
             padw (int): Padding width to be added to the x-coordinates.
             padh (int): Padding height to be added to the y-coordinates.
             img_shape (tuple[int, int] | None): Optional (h, w) of the original patch image. If None, uses
-                labels["img"].shape[:2]. Needed because apply_image may overwrite labels["img"] with the mosaic
-                canvas before apply_instances runs.
+            labels["img"].shape[: 2]. Needed because apply_image may overwrite labels["img"] with the mosaic canvas
+                before apply_instances runs.
 
         Returns:
             (dict): Updated labels dictionary with adjusted instance coordinates.
