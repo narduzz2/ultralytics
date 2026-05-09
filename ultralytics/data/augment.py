@@ -651,9 +651,8 @@ class Mosaic(BaseMixTransform):
             labels (dict[str, Any]): A dictionary containing image and instance information.
             padw (int): Padding width to be added to the x-coordinates.
             padh (int): Padding height to be added to the y-coordinates.
-            img_shape (tuple[int, int] | None): Optional (h, w) of the original patch image. If None, uses
-            labels["img"].shape[: 2]. Needed because apply_image may overwrite labels["img"] with the mosaic canvas
-                before apply_instances runs.
+            img_shape (tuple[int, int] | None): Optional (h, w) of the original patch image.
+                Needed because apply_image may overwrite labels["img"] with the mosaic canvas before apply_instances runs.
 
         Returns:
             (dict): Updated labels dictionary with adjusted instance coordinates.
