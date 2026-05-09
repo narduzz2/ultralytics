@@ -1371,7 +1371,7 @@ class RandomHSV(BaseTransform):
         self.sgain = sgain
         self.vgain = vgain
 
-    def apply_image(self, labels, params: dict = None):
+    def apply_image(self, labels, params: dict[str, Any] | None = None):
         """Apply random HSV augmentation to an image within predefined limits.
 
         This method modifies the input image by randomly adjusting its Hue, Saturation, and Value (HSV) channels. The
@@ -1380,7 +1380,7 @@ class RandomHSV(BaseTransform):
         Args:
             labels (dict[str, Any]): A dictionary containing image data and metadata. Must include an 'img' key with the
                 image as a numpy array.
-            params (dict | None): Unused parameters for API compatibility.
+            params (dict[str, Any] | None): Unused parameters for API compatibility.
 
         Returns:
             (dict[str, Any]): The labels dictionary with the HSV-augmented image.
