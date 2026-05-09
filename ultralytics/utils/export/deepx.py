@@ -38,6 +38,7 @@ def onnx2deepx(
     except ImportError:
         check_requirements("dx_com", cmds="-f https://sdk.deepx.ai/release/dxcom/v2.3.0/index.html")
         import dx_com
+    import onnx
 
     LOGGER.info(f"\n{prefix} starting export with DeepX...")
 
@@ -46,13 +47,14 @@ def onnx2deepx(
     export_path.mkdir(exist_ok=True)
     config_path = export_path / "config.json"
 
+    input_name = onnx.load(str(onnx_file)).graph.input[0].name
     im_files = dataset.dataset.im_files
     with tempfile.TemporaryDirectory(prefix="deepx_calib_") as calib_dir:
         for i, src in enumerate(im_files):
             os.symlink(src, Path(calib_dir) / f"{i:08d}_{Path(src).name}")
 
         config = {
-            "inputs": {"images": [1, 3, imgsz[0], imgsz[1]]},
+            "inputs": {input_name: [1, 3, imgsz[0], imgsz[1]]},
             "calibration_num": len(im_files),
             "calibration_method": "ema",
             "train_batchsize": 32,
