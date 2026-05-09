@@ -28,13 +28,17 @@ def log_config(**extra_kv):
 
     Args:
         **extra_kv: Key-value pairs to set on trainer and log. For TextClassificationTrainer, these attrs already exist;
-            for ClassificationTrainer, they're set via extra_kv. Special keys: ``wandb_group`` sets WANDB_RUN_GROUP env;
-            ``tags`` (list) sets ``wandb.run.tags`` post-init (ultralytics ``wb.init`` does not pass tags=);
-            ``notes`` (str) sets ``wandb.run.notes`` post-init similarly.
+            for ClassificationTrainer, they're set via extra_kv. Special keys exported as wandb env vars at module-load
+        time so they take effect at ``wandb.init`` (post-init mutation does not persist server-side): ``wandb_group`` ->
+            ``WANDB_RUN_GROUP``; ``tags`` (list) -> ``WANDB_TAGS`` (comma-joined); ``notes`` (str) -> ``WANDB_NOTES``.
     """
-    # Set group at creation time so DDP subprocesses inherit it via env
+    # Set group/tags/notes via env so wandb.init picks them up; DDP subprocesses inherit via env.
     if "wandb_group" in extra_kv:
         os.environ["WANDB_RUN_GROUP"] = extra_kv["wandb_group"]
+    if extra_kv.get("tags"):
+        os.environ["WANDB_TAGS"] = ",".join(extra_kv["tags"])
+    if extra_kv.get("notes"):
+        os.environ["WANDB_NOTES"] = extra_kv["notes"]
 
     def callback(trainer):
         for k, v in extra_kv.items():
@@ -42,26 +46,20 @@ def log_config(**extra_kv):
                 setattr(trainer, k, v)
         config = {k: getattr(trainer, k) for k in EXTRA_ATTRS if hasattr(trainer, k)}
         config.update(extra_kv)
-        tags = config.pop("tags", None)
-        notes = config.pop("notes", None)
+        for k in ("wandb_group", "tags", "notes"):
+            config.pop(k, None)
         # Update args.yaml
         args_path = Path(trainer.save_dir) / "args.yaml"
         if args_path.exists() and config:
             data = YAML.load(args_path)
             data.update(config)
             YAML.save(args_path, data)
-        # Update WandB
+        # Update WandB config (tags/notes already set via env at init)
         try:
             import wandb
 
-            config.pop("wandb_group", None)
-            if wandb.run:
-                if config:
-                    wandb.run.config.update(config, allow_val_change=True)
-                if tags:
-                    wandb.run.tags = tuple(tags)
-                if notes:
-                    wandb.run.notes = notes
+            if wandb.run and config:
+                wandb.run.config.update(config, allow_val_change=True)
         except ImportError:
             pass
 

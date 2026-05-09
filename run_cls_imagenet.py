@@ -28,12 +28,10 @@ Flags:
 Single-GPU only: muon_w + nfs_sync + wandb_config callbacks are registered via
 model.add_callback() and silently no-op under DDP respawn (utils/dist.py:79
 serializes the overrides dict, not the model callback list). For multi-GPU,
-subclass ClassificationTrainer and register inside __init__ instead. nfs_sync
-loss under DDP means CE pretrains stay on local SSD only; remember to manually
-rsync /home/fatih/runs/<run>/ -> /data/shared-datasets/fatih-runs/classify/yolo-next-encoder/<run>/
-at finish if the runner ever moves to multi-GPU.
+subclass ClassificationTrainer and register inside __init__ instead.
 """
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -98,22 +96,20 @@ def main(argv: list[str]) -> None:
     batch = int(batch_override) if batch_override else 256
     epochs = int(epochs_override) if epochs_override else resume_args.get("epochs", 114)
 
-    arch = "fastvit" if "fastvit" in model_yaml else "conv"
-    scale = "l" if "yolo26l" in model_yaml else "s"
-    default_tags = ["imagenet-pretrain", "ce-baseline-114ep", "exp5b-recipe", f"yolo26-{arch}", f"scale-{scale}"]
-    default_notes = (
-        "**Goal:** arch-matched ImageNet CE pretrain weights for downstream det/pose/seg finetune comparisons.\n\n"
-        "**Recipe:** byte-exact match to exp5b-ce-baseline (200ep -> 114ep compressed for phase-1 epoch budget alignment).\n"
-        "- Optimizer: MuSGD lr=0.1 wd=0.0001 muon_w=0.1 cos_lr nbs=256\n"
-        "- No warmup, mosaic=1, auto_augment=randaugment, erasing=0.4, hsv (0.015, 0.4, 0.4), fliplr=0.5\n"
-        "- imgsz=224, batch=256, workers=2\n\n"
-        "**Reference:** exp5b-ce-baseline 75.950% top-1 @ ep163 (200ep, conv-s).\n\n"
-        "**Hardware:** ultra4 single-GPU (DDP-unsafe due to model.add_callback registrations; see utils/dist.py:79).\n\n"
-        f"**Data:** {data} (local NVMe copy if /data/datasets/, else NFS).\n"
-        f"**Model:** {model_yaml} (arch={arch}, scale={scale}).\n"
+    stem = Path(model_yaml).stem
+    arch = next(
+        (a for a in ("fastvit", "simplevit", "cls-attn") if a in stem),
+        "vit" if "-vit-" in stem else "conv",
     )
-    tags = [t.strip() for t in tags_override.split(",") if t.strip()] if tags_override else default_tags
-    notes = notes_override or default_notes
+    scale_match = re.match(r"yolo26([nslmx])", stem)
+    scale = scale_match.group(1) if scale_match else "s"
+
+    if tags_override:
+        tags = [t.strip() for t in tags_override.split(",") if t.strip()]
+    else:
+        tags = ["imagenet-pretrain", "ce-baseline-114ep", "exp5b-recipe", f"yolo26-{arch}", f"scale-{scale}"]
+
+    notes = notes_override or None
 
     model = YOLO(model_yaml)
     model.add_callback("on_train_start", muon_w.override(0.1))
