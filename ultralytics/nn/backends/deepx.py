@@ -29,7 +29,6 @@ class DeepXBackend(BaseBackend):
             FileNotFoundError: If no .dxnn file is found in the given directory.
         """
         try:
-            import dx_engine
             from dx_engine import InferenceEngine
         except ImportError as e:
             raise ImportError(
@@ -37,7 +36,7 @@ class DeepXBackend(BaseBackend):
                 "See https://docs.ultralytics.com/integrations/deepx/#runtime-installation for installation instructions."
             ) from e
 
-        LOGGER.info(f"Loading {weight} for DeepX inference (dx_engine v{dx_engine.__version__})...")
+        LOGGER.info(f"Loading {weight} for DeepX inference...")
 
         w = Path(weight)
         found = next(w.rglob("*.dxnn"), None)
