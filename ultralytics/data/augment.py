@@ -1023,6 +1023,7 @@ class RandomPerspective(BaseTransform):
 
         Args:
             img (np.ndarray): Input image used to determine center and dimensions.
+            size (tuple[int, int]): Size of the output image (width, height) used for clipping translation transform.
 
         Returns:
             (M, scale): 3x3 transformation matrix and scale factor.
