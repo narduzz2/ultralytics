@@ -1076,6 +1076,7 @@ class Exporter:
     def export_deepx(self, prefix=colorstr("DeepX:")):
         """Export YOLO model to DeepX format."""
         assert LINUX and not ARM64, "DeepX export only supported on non-aarch64 Linux"
+        assert self.imgsz[0] == self.imgsz[1], f"DeepX export requires square imgsz, got {tuple(self.imgsz)}"
         from ultralytics.utils.export.deepx import onnx2deepx
 
         f = self.export_onnx()
