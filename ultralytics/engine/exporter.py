@@ -160,7 +160,7 @@ def export_formats():
         ["IMX", "imx", "_imx_model", True, True, ["data", "int8", "fraction", "nms"]],
         ["RKNN", "rknn", "_rknn_model", False, False, ["batch", "name"]],
         ["ExecuTorch", "executorch", "_executorch_model", True, False, ["batch"]],
-        ["Axelera", "axelera", "_axelera_model", False, False, ["batch", "int8", "fraction", "data"]],
+        ["Axelera AI", "axelera", "_axelera_model", False, False, ["batch", "int8", "fraction", "data"]],
         ["DeepX", "deepx", "_deepx_model", False, False, ["batch", "int8", "fraction", "data", "optimize"]],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments"], zip(*x)))
