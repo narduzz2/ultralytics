@@ -1453,47 +1453,66 @@ class RandomFlip(BaseTransform):
         self.direction = direction
         self.flip_idx = flip_idx
 
-    def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Apply random flip to an image and update any instances like bounding boxes or keypoints accordingly.
-
-        This method randomly flips the input image either horizontally or vertically based on the initialized
-        probability and direction. It also updates the corresponding instances (bounding boxes, keypoints) to match the
-        flipped image.
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute random flip parameters.
 
         Args:
-            labels (dict[str, Any]): A dictionary containing the following keys:
-                - 'img' (np.ndarray): The image to be flipped.
-                - 'instances' (ultralytics.utils.instance.Instances): Object containing boxes and optionally keypoints.
+            labels (dict[str, Any]): Input labels dictionary containing 'img' and 'instances'.
 
         Returns:
-            (dict[str, Any]): The same dictionary with the flipped image and updated instances:
-                - 'img' (np.ndarray): The flipped image.
-                - 'instances' (ultralytics.utils.instance.Instances): Updated instances matching the flipped image.
-
-        Examples:
-            >>> labels = {"img": np.random.rand(640, 640, 3), "instances": Instances(...)}
-            >>> random_flip = RandomFlip(p=0.5, direction="horizontal")
-            >>> flipped_labels = random_flip(labels)
+            (dict): Parameters including 'flip' (bool), 'h', 'w', 'direction', and 'flip_idx'.
         """
         img = labels["img"]
-        instances = labels.pop("instances")
-        instances.convert_bbox(format="xywh")
+        instances = labels["instances"]
         h, w = img.shape[:2]
         h = 1 if instances.normalized else h
         w = 1 if instances.normalized else w
+        return {
+            "flip": random.random() < self.p,
+            "h": h,
+            "w": w,
+            "direction": self.direction,
+            "flip_idx": self.flip_idx,
+        }
 
-        # WARNING: two separate if and calls to random.random() intentional for reproducibility with older versions
-        if self.direction == "vertical" and random.random() < self.p:
-            img = np.flipud(img)
-            instances.flipud(h)
-            if self.flip_idx is not None and instances.keypoints is not None:
-                instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
-        if self.direction == "horizontal" and random.random() < self.p:
-            img = np.fliplr(img)
-            instances.fliplr(w)
-            if self.flip_idx is not None and instances.keypoints is not None:
-                instances.keypoints = np.ascontiguousarray(instances.keypoints[:, self.flip_idx, :])
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Apply flip to the image.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'img'.
+            params (dict): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with flipped (or unchanged) image.
+        """
+        img = labels["img"]
+        if params["flip"]:
+            if params["direction"] == "vertical":
+                img = np.flipud(img)
+            elif params["direction"] == "horizontal":
+                img = np.fliplr(img)
         labels["img"] = np.ascontiguousarray(img)
+        return labels
+
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Apply flip to object instances.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'instances'.
+            params (dict): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with flipped (or unchanged) instances.
+        """
+        instances = labels.pop("instances")
+        instances.convert_bbox(format="xywh")
+        if params["flip"]:
+            if params["direction"] == "vertical":
+                instances.flipud(params["h"])
+            elif params["direction"] == "horizontal":
+                instances.fliplr(params["w"])
+            if params["flip_idx"] is not None and instances.keypoints is not None:
+                instances.keypoints = np.ascontiguousarray(instances.keypoints[:, params["flip_idx"], :])
         labels["instances"] = instances
         return labels
 
@@ -1581,7 +1600,28 @@ class LetterBox(BaseTransform):
         """
         if labels is None:
             labels = {}
-        img = labels.get("img") if image is None else image
+        return_image_only = len(labels) == 0
+        if image is not None:
+            labels["img"] = image
+        params = self.get_params(labels)
+        labels = self.apply_image(labels, params)
+        if not return_image_only:
+            labels = self.apply_instances(labels, params)
+        labels = self.apply_semantic(labels, params)
+        if return_image_only:
+            return labels["img"]
+        return labels
+
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute letterboxing parameters.
+
+        Args:
+            labels (dict[str, Any]): Input labels dictionary containing 'img'.
+
+        Returns:
+            (dict): Parameters including 'orig_shape', 'new_shape', 'ratio', padding, and resize info.
+        """
+        img = labels["img"]
         shape = img.shape[:2]  # current shape [height, width]
         new_shape = labels.pop("rect_shape", self.new_shape)
         if isinstance(new_shape, int):
@@ -1607,14 +1647,42 @@ class LetterBox(BaseTransform):
             dw /= 2  # divide padding into 2 sides
             dh /= 2
 
+        top, bottom = round(dh - 0.1) if self.center else 0, round(dh + 0.1)
+        left, right = round(dw - 0.1) if self.center else 0, round(dw + 0.1)
+
+        return {
+            "orig_shape": shape,
+            "new_shape": new_shape,
+            "ratio": ratio,
+            "new_unpad": new_unpad,
+            "top": top,
+            "bottom": bottom,
+            "left": left,
+            "right": right,
+        }
+
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Resize and pad the image.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'img'.
+            params (dict): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with resized and padded image.
+        """
+        img = labels["img"]
+        shape = img.shape[:2]
+        new_unpad = params["new_unpad"]
+
         if shape[::-1] != new_unpad:  # resize
             img = cv2.resize(img, new_unpad, interpolation=self.interpolation)
             if img.ndim == 2:
                 img = img[..., None]
 
-        top, bottom = round(dh - 0.1) if self.center else 0, round(dh + 0.1)
-        left, right = round(dw - 0.1) if self.center else 0, round(dw + 0.1)
         h, w, c = img.shape
+        top, bottom = params["top"], params["bottom"]
+        left, right = params["left"], params["right"]
         if c == 3:
             img = cv2.copyMakeBorder(
                 img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(self.padding_value,) * 3
@@ -1624,19 +1692,30 @@ class LetterBox(BaseTransform):
             pad_img[top : top + h, left : left + w] = img
             img = pad_img
 
-        if labels.get("ratio_pad"):
-            labels["ratio_pad"] = (labels["ratio_pad"], (left, top))  # for evaluation
+        labels["img"] = img
+        labels["resized_shape"] = params["new_shape"]
+        return labels
 
-        if len(labels):
-            labels = self._update_labels(labels, ratio, left, top)
-            labels["img"] = img
-            labels["resized_shape"] = new_shape
-            return labels
-        else:
-            return img
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Update instance coordinates after letterboxing.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'instances'.
+            params (dict): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with transformed instances.
+        """
+        if "instances" in labels:
+            labels = self._update_labels(labels, params["ratio"], params["left"], params["top"], params["orig_shape"])
+        if labels.get("ratio_pad"):
+            labels["ratio_pad"] = (labels["ratio_pad"], (params["left"], params["top"]))  # for evaluation
+        return labels
 
     @staticmethod
-    def _update_labels(labels: dict[str, Any], ratio: tuple[float, float], padw: float, padh: float) -> dict[str, Any]:
+    def _update_labels(
+        labels: dict[str, Any], ratio: tuple[float, float], padw: float, padh: float, orig_shape: tuple[int, int]
+    ) -> dict[str, Any]:
         """Update labels after applying letterboxing to an image.
 
         This method modifies the bounding box coordinates of instances in the labels to account for resizing and padding
@@ -1647,6 +1726,7 @@ class LetterBox(BaseTransform):
             ratio (tuple[float, float]): Scaling ratios (width, height) applied to the image.
             padw (float): Padding width added to the image.
             padh (float): Padding height added to the image.
+            orig_shape (tuple[int, int]): Original image shape (height, width) before resizing.
 
         Returns:
             (dict[str, Any]): Updated labels dictionary with modified instance coordinates.
@@ -1656,10 +1736,10 @@ class LetterBox(BaseTransform):
             >>> labels = {"instances": Instances(...)}
             >>> ratio = (0.5, 0.5)
             >>> padw, padh = 10, 20
-            >>> updated_labels = letterbox._update_labels(labels, ratio, padw, padh)
+            >>> updated_labels = letterbox._update_labels(labels, ratio, padw, padh, (480, 640))
         """
         labels["instances"].convert_bbox(format="xyxy")
-        labels["instances"].denormalize(*labels["img"].shape[:2][::-1])
+        labels["instances"].denormalize(*orig_shape[::-1])
         labels["instances"].scale(*ratio)
         labels["instances"].add_padding(padw, padh)
         return labels
@@ -2228,14 +2308,14 @@ class LoadVisualPrompt(BaseTransform):
 
         return (r >= x1) * (r < x2) * (c >= y1) * (c < y2)
 
-    def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Process labels to create visual prompts.
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute visual prompt parameters.
 
         Args:
-            labels (dict[str, Any]): Dictionary containing image data and annotations.
+            labels (dict[str, Any]): Input labels dictionary.
 
         Returns:
-            (dict[str, Any]): Updated labels with visual prompts added.
+            (dict): Parameters including 'imgsz', 'bboxes', 'masks', and 'cls'.
         """
         imgsz = labels["img"].shape[1:]
         bboxes, masks = None, None
@@ -2246,7 +2326,19 @@ class LoadVisualPrompt(BaseTransform):
             masks = labels["masks"]
 
         cls = labels["cls"].squeeze(-1).to(torch.int)
-        visuals = self.get_visuals(cls, imgsz, bboxes=bboxes, masks=masks)
+        return {"imgsz": imgsz, "bboxes": bboxes, "masks": masks, "cls": cls}
+
+    def apply_image(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Create visual prompts and add them to labels.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing image data and annotations.
+            params (dict): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with visual prompts added.
+        """
+        visuals = self.get_visuals(params["cls"], params["imgsz"], bboxes=params["bboxes"], masks=params["masks"])
         labels["visuals"] = visuals
         return labels
 
@@ -2351,24 +2443,14 @@ class RandomLoadText(BaseTransform):
         self.padding = padding
         self.padding_value = padding_value
 
-    def __call__(self, labels: dict[str, Any]) -> dict[str, Any]:
-        """Randomly sample positive and negative texts and update class indices accordingly.
-
-        This method samples positive texts based on the existing class labels in the image, and randomly selects
-        negative texts from the remaining classes. It then updates the class indices to match the new sampled text
-        order.
+    def get_params(self, labels: dict[str, Any]) -> dict[str, Any]:
+        """Compute text sampling parameters.
 
         Args:
-            labels (dict[str, Any]): A dictionary containing image labels and metadata. Must include 'texts' and 'cls'
-                keys.
+            labels (dict[str, Any]): Input labels dictionary containing 'texts', 'cls', and 'instances'.
 
         Returns:
-            (dict[str, Any]): Updated labels dictionary with new 'cls' and 'texts' entries.
-
-        Examples:
-            >>> loader = RandomLoadText(prompt_format="A photo of {}", neg_samples=(5, 10), max_samples=20)
-            >>> labels = {"cls": np.array([[0], [1], [2]]), "texts": [["dog"], ["cat"], ["bird"]]}
-            >>> updated_labels = loader(labels)
+            (dict): Parameters including 'valid_idx', 'new_cls', and 'texts'.
         """
         assert "texts" in labels, "No texts found in labels."
         class_texts = labels["texts"]
@@ -2395,8 +2477,6 @@ class RandomLoadText(BaseTransform):
                 continue
             valid_idx[i] = True
             new_cls.append([label2ids[label]])
-        labels["instances"] = labels["instances"][valid_idx]
-        labels["cls"] = np.array(new_cls)
 
         # Randomly select one prompt when there's more than one prompts
         texts = []
@@ -2413,7 +2493,22 @@ class RandomLoadText(BaseTransform):
                 texts += random.choices(self.padding_value, k=num_padding)
 
         assert len(texts) == self.max_samples
-        labels["texts"] = texts
+
+        return {"valid_idx": valid_idx, "new_cls": np.array(new_cls), "texts": texts}
+
+    def apply_instances(self, labels: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+        """Filter instances and update class labels based on sampled texts.
+
+        Args:
+            labels (dict[str, Any]): Dictionary containing 'instances' and 'cls'.
+            params (dict): Parameters from get_params.
+
+        Returns:
+            (dict): Updated labels with filtered instances and new class/text entries.
+        """
+        labels["instances"] = labels["instances"][params["valid_idx"]]
+        labels["cls"] = params["new_cls"]
+        labels["texts"] = params["texts"]
         return labels
 
 
