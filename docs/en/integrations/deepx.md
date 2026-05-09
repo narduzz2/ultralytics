@@ -81,7 +81,7 @@ The `dx_com` compiler package will be automatically installed from the DeepX SDK
 | `batch`    | `int`            | `1`              | Specifies export model batch inference size or the max number of images the exported model will process concurrently in `predict` mode. |
 | `int8`     | `bool`           | `True`           | Enables INT8 quantization. Required for DeepX export — automatically set to `True` if not specified.                                    |
 | `data`     | `str`            | `'coco128.yaml'` | Dataset configuration file used for INT8 calibration. Specifies the calibration image source.                                           |
-| `fraction` | `float`          | `1.0`            | Fraction of the calibration dataset to use. Reduce to speed up export; 100–400 images are typically sufficient for good accuracy.       |
+| `fraction` | `float`          | `1.0`            | Specifies the fraction of the dataset to use for INT8 quantization calibration. Allows for calibrating on a subset of the full dataset, useful for experiments or when resources are limited. If not specified with INT8 enabled, the full dataset will be used. |
 | `device`   | `str`            | `None`           | Specifies the device for exporting: GPU (`device=0`) or CPU (`device=cpu`).                                                             |
 | `optimize` | `bool`           | `False`          | Enables higher compiler optimization which reduces inference latency and increases compilation time.                                    |
 
@@ -258,7 +258,7 @@ Yes. Any model trained using [Ultralytics Train Mode](../modes/train.md) and exp
 
 ### How many calibration images should I use for DeepX export?
 
-The DeepX export pipeline defaults to 100 calibration images using the EMA calibration method. This is generally sufficient for good quantization accuracy. You can adjust the calibration dataset using the `data` and `fraction` arguments, but using more than a few hundred images rarely improves results significantly.
+The DeepX export pipeline uses every image in the calibration dataset (after `fraction` filtering) with the EMA calibration method. A few hundred images is usually sufficient for good quantization accuracy. Point `data` at a smaller dataset (or set `fraction` below `1.0`) if compilation time becomes a concern on large datasets.
 
 ### How do I install the DeepX runtime for inference?
 
