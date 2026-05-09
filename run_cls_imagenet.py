@@ -25,10 +25,13 @@ Flags:
         per-arch summary of recipe, reference top-1, single-gpu constraint,
         and data path.
 
-Single-GPU only: muon_w + wandb_config callbacks are registered via
+Single-GPU only: muon_w + nfs_sync + wandb_config callbacks are registered via
 model.add_callback() and silently no-op under DDP respawn (utils/dist.py:79
 serializes the overrides dict, not the model callback list). For multi-GPU,
-subclass ClassificationTrainer and register inside __init__ instead.
+subclass ClassificationTrainer and register inside __init__ instead. nfs_sync
+loss under DDP means CE pretrains stay on local SSD only; remember to manually
+rsync /home/fatih/runs/<run>/ -> /data/shared-datasets/fatih-runs/classify/yolo-next-encoder/<run>/
+at finish if the runner ever moves to multi-GPU.
 """
 import os
 import sys
@@ -39,7 +42,7 @@ os.environ["PYTHONPATH"] = _REPO_ROOT + os.pathsep + os.environ.get("PYTHONPATH"
 
 import torch
 
-from callbacks import muon_w, paths, wandb_config
+from callbacks import muon_w, nfs_sync, paths, wandb_config
 from ultralytics import YOLO
 
 
@@ -114,6 +117,9 @@ def main(argv: list[str]) -> None:
 
     model = YOLO(model_yaml)
     model.add_callback("on_train_start", muon_w.override(0.1))
+    sync_start, sync_end = nfs_sync.setup(str(paths.NFS_MIRROR_ROOT), interval_sec=paths.SYNC_INTERVAL_SEC)
+    model.add_callback("on_train_start", sync_start)
+    model.add_callback("on_train_end", sync_end)
     model.add_callback(
         "on_pretrain_routine_start",
         wandb_config.log_config(
