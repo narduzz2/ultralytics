@@ -16,7 +16,7 @@ from ultralytics.engine.trainer import BaseTrainer
 from ultralytics.models import yolo
 from ultralytics.utils import DEFAULT_CFG, LOGGER, RANK
 from ultralytics.nn.tasks import SemanticSegmentationModel
-from ultralytics.utils.plotting import colors, plt_settings
+from ultralytics.utils.plotting import Annotator, colors, plt_settings
 from ultralytics.utils.torch_utils import torch_distributed_zero_first
 
 
@@ -202,12 +202,9 @@ class SemanticSegmentationTrainer(BaseTrainer):
 
             # Mask overlay
             mask = masks[i].cpu().numpy()
-            overlay = np.zeros_like(img)
-            for cls_id in np.unique(mask):
-                if cls_id == 255:
-                    continue
-                overlay[mask == cls_id] = colors(int(cls_id), True)
-            img = cv2.addWeighted(img, 0.6, overlay, 0.4, 0)
+            annotator = Annotator(img, line_width=1)
+            annotator.semantic_mask(mask, alpha=0.4)
+            img = annotator.result()
 
             # Place in grid
             row, col = i // ns, i % ns

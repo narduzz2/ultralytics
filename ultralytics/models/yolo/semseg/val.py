@@ -17,7 +17,7 @@ from ultralytics.data.dataset import PolygonSemsegDataset, SemsegDataset, add_po
 from ultralytics.engine.validator import BaseValidator
 from ultralytics.utils import LOGGER, RANK
 from ultralytics.utils.metrics import SemsegMetrics
-from ultralytics.utils.plotting import colors, plot_images, plt_settings
+from ultralytics.utils.plotting import Annotator, colors, plot_images, plt_settings
 
 
 class SemanticSegmentationValidator(BaseValidator):
@@ -271,12 +271,9 @@ class SemanticSegmentationValidator(BaseValidator):
             if img.shape[2] == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
             mask = masks_np[i]
-            overlay = np.zeros_like(img)
-            for cls_id in np.unique(mask):
-                if cls_id == 255:
-                    continue
-                overlay[mask == cls_id] = colors(int(cls_id), True)
-            img = cv2.addWeighted(img, 0.6, overlay, 0.4, 0)
+            annotator = Annotator(img, line_width=1)
+            annotator.semantic_mask(mask, alpha=0.4)
+            img = annotator.result()
             if img.shape[2] == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             overlaid.append(img)
@@ -312,12 +309,9 @@ class SemanticSegmentationValidator(BaseValidator):
             if img.shape[2] == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
             mask = preds_np[i]
-            overlay = np.zeros_like(img)
-            for cls_id in np.unique(mask):
-                if cls_id == 255:
-                    continue
-                overlay[mask == cls_id] = colors(int(cls_id), True)
-            img = cv2.addWeighted(img, 0.6, overlay, 0.4, 0)
+            annotator = Annotator(img, line_width=1)
+            annotator.semantic_mask(mask, alpha=0.4)
+            img = annotator.result()
             if img.shape[2] == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             overlaid.append(img)

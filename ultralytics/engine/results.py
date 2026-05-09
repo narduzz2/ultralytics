@@ -572,13 +572,7 @@ class Results(SimpleClass, DataExportMixin):
         # Plot Semantic Segmentation results
         if self.semantic_mask is not None and show_masks:
             sem_mask = self.semantic_mask.cpu().numpy() if isinstance(self.semantic_mask, torch.Tensor) else self.semantic_mask
-            overlay = np.zeros_like(annotator.result())
-            for cls_id in np.unique(sem_mask):
-                if cls_id == 255:
-                    continue
-                color = colors(int(cls_id), True)
-                overlay[sem_mask == cls_id] = color
-            annotator.im = cv2.addWeighted(annotator.result(), 0.5, overlay, 0.5, 0)
+            annotator.semantic_mask(sem_mask, alpha=0.5)
 
         # Plot Pose results
         if self.keypoints is not None:
