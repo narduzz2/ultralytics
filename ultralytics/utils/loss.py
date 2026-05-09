@@ -1289,7 +1289,7 @@ class SemanticSegmentationLoss(nn.Module):
     def _resize_masks(self, masks, target_shape):
         """Resize masks to match prediction spatial dims."""
         if masks.shape[1:] != target_shape:
-            return F.interpolate(masks.float().unsqueeze(1), size=target_shape, mode="nearest").squeeze(1).long()
+            return F.interpolate(masks.float().unsqueeze(1), size=target_shape, mode="nearest").squeeze(1).to(torch.int32)
         return masks
 
     def _ce_loss(self, preds, masks):
@@ -1308,7 +1308,7 @@ class SemanticSegmentationLoss(nn.Module):
             return self._binary_dice_loss(preds, masks)
         valid = masks != 255
         pred_soft = F.softmax(preds, dim=1)
-        target_onehot = F.one_hot(masks.clamp(0, self.nc - 1), self.nc).permute(0, 3, 1, 2).float()
+        target_onehot = F.one_hot(masks.clamp(0, self.nc - 1).long(), self.nc).permute(0, 3, 1, 2).float()
         valid_mask = valid.unsqueeze(1).expand_as(target_onehot).float()
         intersection = (pred_soft * target_onehot * valid_mask).sum(dim=(0, 2, 3))
         cardinality = ((pred_soft + target_onehot) * valid_mask).sum(dim=(0, 2, 3))

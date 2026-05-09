@@ -2316,7 +2316,7 @@ class Format:
                 masks = torch.from_numpy(masks)
                 cls_tensor = torch.from_numpy(cls.squeeze(1))
                 if self.mask_overlap:
-                    sem_masks = cls_tensor[masks[0].long() - 1]  # (H, W) from (1, H, W) instance indices
+                    sem_masks = cls_tensor[masks[0].to(torch.int32) - 1]  # (H, W) from (1, H, W) instance indices
                 else:
                     # Create sem_masks consistent with mask_overlap=True
                     sem_masks = (masks * cls_tensor[:, None, None]).max(0).values  # (H, W) from (N, H, W) binary
@@ -2434,12 +2434,12 @@ class SemanticFormat(Format):
             labels (dict): Dictionary with 'img' (np.ndarray) and 'semantic_mask' (np.ndarray).
 
         Returns:
-            (dict): Dictionary with 'img' as CHW float32 tensor and 'semantic_mask' as int64 tensor.
+            (dict): Dictionary with 'img' as CHW float32 tensor and 'semantic_mask' as int32 tensor.
         """
         img = self._format_img(labels.get("img"))
         mask = labels.get("semantic_mask")
         labels["img"] = img
-        labels["semantic_mask"] = torch.from_numpy(mask.copy()).long()
+        labels["semantic_mask"] = torch.from_numpy(mask.copy()).to(torch.int32)
 
         # Remove keys not needed downstream
         for k in ("instances", "cls", "resized_shape", "ori_shape", "ratio_pad"):

@@ -81,7 +81,9 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         batch["img"] = batch["img"].to(self.device, non_blocking=self.device.type == "cuda")
         batch["img"] = (batch["img"].half() if self.args.half else batch["img"].float()) / 255
-        batch["semantic_mask"] = batch["semantic_mask"].to(self.device, non_blocking=self.device.type == "cuda").long()
+        batch["semantic_mask"] = (
+            batch["semantic_mask"].to(self.device, non_blocking=self.device.type == "cuda").to(torch.int32)
+        )
         self._semantic_target_shape = tuple(batch["semantic_mask"].shape[-2:])
         return batch
 
@@ -102,7 +104,7 @@ class SemanticSegmentationValidator(BaseValidator):
             else F.interpolate(preds, scale_factor=8, mode="bilinear", align_corners=False)
         )
         if self.nc > 1:
-            pred_mask = preds.argmax(dim=1)
+            pred_mask = preds.argmax(dim=1).to(torch.int32)
         else:
             pred_mask = preds.gt(0).squeeze(1)
         return pred_mask
@@ -116,7 +118,9 @@ class SemanticSegmentationValidator(BaseValidator):
         """
         targets = batch["semantic_mask"]
         if preds.shape[1:] != targets.shape[1:]:
-            preds = F.interpolate(preds.float().unsqueeze(1), targets.shape[1:], mode="nearest").squeeze(1).long()
+            preds = (
+                F.interpolate(preds.float().unsqueeze(1), targets.shape[1:], mode="nearest").squeeze(1).to(torch.int32)
+            )
         if self.args.save_json:
             self.save_pred_masks(preds, batch)
         self.metrics.update_stats(preds, targets)
@@ -133,7 +137,7 @@ class SemanticSegmentationValidator(BaseValidator):
             return
         if self.metrics.matrix is None:
             cm_nc = self.metrics.cm_nc
-            self.metrics.matrix = torch.zeros((cm_nc, cm_nc), device=self.device, dtype=torch.int64)
+            self.metrics.matrix = torch.zeros((cm_nc, cm_nc), device=self.device, dtype=torch.float32)
         dist.reduce(self.metrics.matrix, dst=0, op=dist.ReduceOp.SUM)
         # Gather nt_per_image across ranks
         if RANK == 0:

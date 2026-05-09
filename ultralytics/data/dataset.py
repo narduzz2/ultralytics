@@ -1026,7 +1026,7 @@ class PolygonSemsegDataset(YOLODataset):
         polys = [np.asarray(s, dtype=np.float32).reshape(-1, 2) * scale for s in segments]
         # Returns (H, W) instance index map: 0 = no polygon, 1..N = sorted instance index.
         inst, sorted_idx = polygons2masks_overlap((h, w), polys, downsample_ratio=1)
-        cls_arr = np.asarray(cls).reshape(-1).astype(np.int64)[sorted_idx]
+        cls_arr = np.asarray(cls).reshape(-1).astype(np.int32)[sorted_idx]
         out = np.full((h, w), self.bg_class_idx, dtype=np.uint8)
         fg = inst > 0
         out[fg] = cls_arr[inst[fg] - 1].astype(np.uint8)

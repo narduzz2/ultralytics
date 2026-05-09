@@ -228,7 +228,7 @@ class SemanticSegmentationTrainer(BaseTrainer):
         LOGGER.info(f"Plotting labels to {self.save_dir / 'labels.jpg'}... ")
         nc = self.data["nc"]
         names = self.data["names"]
-        pixel_counts = np.zeros(nc, dtype=np.int64)
+        pixel_counts = np.zeros(nc, dtype=np.int32)
 
         dataset = self.train_loader.dataset
         mask_files = getattr(dataset, "mask_files", [])
