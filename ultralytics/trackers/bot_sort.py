@@ -6,13 +6,14 @@ from collections import deque
 from typing import Any
 
 import numpy as np
+import torch
 
 from .basetrack import TrackState
 from .byte_tracker import BYTETracker, STrack
 from .utils import matching
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYWH
-from .utils.reid import build_encoder
+from .utils.reid import ReID, build_encoder
 
 
 class BOTrack(STrack):
@@ -190,7 +191,7 @@ class BOTSORT(BYTETracker):
         """Return an instance of KalmanFilterXYWH for predicting and updating object states in the tracking process."""
         return KalmanFilterXYWH()
 
-    def init_track(self, results, img: np.ndarray | None = None) -> list[BOTrack]:
+    def init_track(self, results, img: np.ndarray | torch.Tensor | None = None) -> list[BOTrack]:
         """Initialize object tracks using detection bounding boxes, scores, class labels, and optional ReID features."""
         if len(results) == 0:
             return []

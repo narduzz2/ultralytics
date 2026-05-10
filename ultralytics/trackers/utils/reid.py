@@ -86,5 +86,11 @@ def build_encoder(with_reid: bool, model: str | None):
     if not with_reid:
         return None
     if model == "auto":
-        return lambda feats, _dets: [f.cpu().numpy() for f in feats]
+
+        def _auto_encoder(feats, _dets):
+            if isinstance(feats, np.ndarray):
+                return [f for f in feats]
+            return [f.cpu().numpy() for f in feats]
+
+        return _auto_encoder
     return ReID(model)

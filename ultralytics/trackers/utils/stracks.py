@@ -7,6 +7,8 @@ implementation exposes (`track_id`, `frame_id`, `start_frame`, `xyxy`, `mean`, `
 
 from __future__ import annotations
 
+__all__ = ("merge_track_pools", "joint_stracks", "sub_stracks", "remove_duplicate_stracks", "multi_gmc")
+
 import numpy as np
 
 from ..basetrack import TrackState

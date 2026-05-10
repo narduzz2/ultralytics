@@ -148,7 +148,7 @@ def attach_raw_preds_hook(predictor) -> None:
 
     @wraps(orig)
     def _wrapped(preds, img, *args, **kwargs):
-        predictor._raw_preds = preds.detach() if isinstance(preds, torch.Tensor) else preds
+        predictor._raw_preds = preds.detach().cpu() if isinstance(preds, torch.Tensor) else preds
         predictor._preproc_img_shape = img.shape[2:]
         return orig(preds, img, *args, **kwargs)
 
@@ -187,9 +187,9 @@ def compute_dets_del(predictor) -> list | None:
             continue
         loose = loose.clone()
         if im_shape is not None:
-            loose[:, :4] = ops.scale_boxes(im_shape, loose[:, :4], result.orig_shape)
+            loose[:, :4] = ops.scale_boxes(im_shape, loose[:, :4], result.orig_shape, xywh=is_obb)
         tight_xyxy = tight.xyxy.cpu()
-        loose_xyxy = loose[:, :4].cpu()
+        loose_xyxy = ops.xywh2xyxy(loose[:, :4]).cpu() if is_obb else loose[:, :4].cpu()
         if tight_xyxy.numel() == 0 or loose_xyxy.numel() == 0:
             out.append(None)
             continue
@@ -199,7 +199,10 @@ def compute_dets_del(predictor) -> list | None:
             out.append(None)
             continue
         dels = loose[mask].cpu()
-        xywh = ops.xyxy2xywh(dels[:, :4]).numpy()
+        if is_obb:
+            xywh = np.concatenate([dels[:, :4].numpy(), dels[:, 6:7].numpy()], axis=1)
+        else:
+            xywh = ops.xyxy2xywh(dels[:, :4]).numpy()
         out.append((xywh, dels[:, 4].numpy(), dels[:, 5].numpy()))
 
     predictor._raw_preds = None
@@ -647,6 +650,8 @@ def _cosine_distance(tracks: list[TTSTrack], dets: list[TTSTrack]) -> np.ndarray
         if feat is not None:
             dim = feat.shape[0]
             break
+    else:
+        LOGGER.warning("TRACKTRACK ReID enabled but all features are None; falling back to zero embeddings.")
     zeros = np.zeros(dim, dtype=np.float32)
     track_feats = np.stack([t.smooth_feat if t.smooth_feat is not None else zeros for t in tracks])
     det_feats = np.stack([d.curr_feat if d.curr_feat is not None else zeros for d in dets])
