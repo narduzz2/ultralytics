@@ -174,6 +174,8 @@ class DetectionValidator(BaseValidator):
             preds (list[dict[str, torch.Tensor]]): List of predictions from the model.
             batch (dict[str, Any]): Batch data containing ground truth.
         """
+        if self.args.analyze_images:
+            from ultralytics.utils.analysis import _compute_objectlab_scores
         for si, pred in enumerate(preds):
             self.seen += 1
             pbatch = self._prepare_batch(si, batch)
@@ -181,9 +183,10 @@ class DetectionValidator(BaseValidator):
 
             cls = pbatch["cls"].cpu().numpy()
             no_pred = predn["cls"].shape[0] == 0
+            process_out = self._process_batch(predn, pbatch)
             self.metrics.update_stats(
                 {
-                    **self._process_batch(predn, pbatch),
+                    **process_out,
                     "target_cls": cls,
                     "target_img": np.unique(cls),
                     "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
@@ -191,6 +194,17 @@ class DetectionValidator(BaseValidator):
                     "im_name": Path(pbatch["im_file"]).name,
                 }
             )
+            if self.args.analyze_images and "iou_matrix" in process_out:
+                self.metrics.box.image_metrics[Path(pbatch["im_file"]).name].update(
+                    _compute_objectlab_scores(
+                        process_out["iou_matrix"],
+                        predn["bboxes"].cpu().numpy(),
+                        predn["cls"].cpu().numpy(),
+                        predn["conf"].cpu().numpy(),
+                        pbatch["bboxes"].cpu().numpy(),
+                        cls,
+                    )
+                )
             # Evaluate
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, pbatch, conf=self.args.conf)
@@ -297,13 +311,17 @@ class DetectionValidator(BaseValidator):
             batch (dict[str, Any]): Batch dictionary containing ground truth data with 'bboxes' and 'cls' keys.
 
         Returns:
-            (dict[str, np.ndarray]): Dictionary containing 'tp' key with correct prediction matrix of shape (N, 10) for
-                10 IoU levels.
+            (dict[str, np.ndarray]): ``tp`` key holds the (N, 10) correct-prediction matrix at 10 IoU levels. When
+                ``args.analyze_images`` is set and both predictions and GT exist, ``iou_matrix`` is also returned for
+                ObjectLab label-quality scoring in ``update_metrics``.
         """
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = box_iou(batch["bboxes"], preds["bboxes"])
-        return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou).cpu().numpy()}
+        out = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou).cpu().numpy()}
+        if self.args.analyze_images:
+            out["iou_matrix"] = iou.cpu().numpy()
+        return out
 
     def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None) -> torch.utils.data.Dataset:
         """Build YOLO Dataset.
