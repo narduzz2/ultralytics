@@ -92,10 +92,7 @@ class OBBValidator(DetectionValidator):
         if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
             return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
         iou = batch_probiou(batch["bboxes"], preds["bboxes"])
-        out = {"tp": self.match_predictions(preds["cls"], batch["cls"], iou).cpu().numpy()}
-        if self.args.analyze_images:
-            out["iou_matrix"] = iou.cpu().numpy()
-        return out
+        return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou).cpu().numpy()}
 
     def postprocess(self, preds: torch.Tensor) -> list[dict[str, torch.Tensor]]:
         """Postprocess OBB predictions.

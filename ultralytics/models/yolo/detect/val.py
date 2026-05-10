@@ -175,36 +175,51 @@ class DetectionValidator(BaseValidator):
             batch (dict[str, Any]): Batch data containing ground truth.
         """
         if self.args.analyze_images:
-            from ultralytics.utils.analysis import _compute_objectlab_scores
+            from ultralytics.utils.analysis import compute_objectlab_scores
         for si, pred in enumerate(preds):
             self.seen += 1
             pbatch = self._prepare_batch(si, batch)
             predn = self._prepare_pred(pred)
+            im_name = Path(pbatch["im_file"]).name
 
             cls = pbatch["cls"].cpu().numpy()
             no_pred = predn["cls"].shape[0] == 0
+            pred_cls_np = np.zeros(0) if no_pred else predn["cls"].cpu().numpy()
+            pred_conf_np = np.zeros(0) if no_pred else predn["conf"].cpu().numpy()
             process_out = self._process_batch(predn, pbatch)
+            iou_matrix = process_out.pop("iou_matrix", None)
             self.metrics.update_stats(
                 {
                     **process_out,
                     "target_cls": cls,
                     "target_img": np.unique(cls),
-                    "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
-                    "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
-                    "im_name": Path(pbatch["im_file"]).name,
+                    "conf": pred_conf_np,
+                    "pred_cls": pred_cls_np,
+                    "im_name": im_name,
                 }
             )
-            if self.args.analyze_images and "iou_matrix" in process_out:
-                self.metrics.box.image_metrics[Path(pbatch["im_file"]).name].update(
-                    _compute_objectlab_scores(
-                        process_out["iou_matrix"],
-                        predn["bboxes"].cpu().numpy(),
-                        predn["cls"].cpu().numpy(),
-                        predn["conf"].cpu().numpy(),
-                        pbatch["bboxes"].cpu().numpy(),
-                        cls,
-                    )
+            # Skip rotated-box tasks (OBB) where pbatch["bboxes"] is (N, 5) xywha and ops.scale_boxes would corrupt it.
+            if self.args.analyze_images and pbatch["bboxes"].shape[-1] == 4:
+                pred_xyxy = ops.scale_boxes(
+                    pbatch["imgsz"], predn["bboxes"].clone(), pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
                 )
+                gt_xyxy = ops.scale_boxes(
+                    pbatch["imgsz"], pbatch["bboxes"].clone(), pbatch["ori_shape"], ratio_pad=pbatch["ratio_pad"]
+                )
+                extras = {
+                    "pred_bboxes": pred_xyxy.cpu().numpy(),
+                    "pred_cls": pred_cls_np,
+                    "pred_conf": pred_conf_np,
+                    "gt_bboxes": gt_xyxy.cpu().numpy(),
+                    "gt_cls": cls,
+                }
+                if iou_matrix is not None:
+                    extras.update(
+                        compute_objectlab_scores(
+                            iou_matrix, extras["pred_bboxes"], pred_cls_np, pred_conf_np, extras["gt_bboxes"], cls
+                        )
+                    )
+                self.metrics.box.image_metrics[im_name].update(extras)
             # Evaluate
             if self.args.plots:
                 self.confusion_matrix.process_batch(predn, pbatch, conf=self.args.conf)
