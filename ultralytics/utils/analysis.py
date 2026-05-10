@@ -1,3 +1,4 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """Per-image property correlation analysis for object detection.
 
 Joins per-image P/R/F1 scores from the validator with image properties (brightness, blurriness,

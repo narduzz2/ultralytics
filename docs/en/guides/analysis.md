@@ -32,15 +32,15 @@ report = ImagePropertyAnalyzer(data="coco128.yaml").run()
 
 Each call writes the following to a timestamped `runs/analysis/` directory:
 
-| File | Purpose |
-|---|---|
-| `per_image_analysis.csv` | One row per image, sorted ascending by F1 (or by anomaly_score in dataset-only path) |
-| `correlations.json` | Pearson + Spearman r and p-values per property, with effect-size band and direction |
-| `worst_images.json` | Top 100 worst-performing images plus their top 3 problematic properties |
-| `summary.md` | Human-readable summary with top correlations and worst-image table |
-| `correlation_scatter.png` | Per-property scatter against F1 with regression line and Pearson r |
-| `correlation_heatmap.png` | Property × property Pearson r matrix (self-correlations blanked) |
-| `worst_images_strip.png` | Thumbnails of bottom 20 by F1 with green ground-truth and red dashed prediction boxes |
+| File                      | Purpose                                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| `per_image_analysis.csv`  | One row per image, sorted ascending by F1 (or by anomaly_score in dataset-only path)  |
+| `correlations.json`       | Pearson + Spearman r and p-values per property, with effect-size band and direction   |
+| `worst_images.json`       | Top 100 worst-performing images plus their top 3 problematic properties               |
+| `summary.md`              | Human-readable summary with top correlations and worst-image table                    |
+| `correlation_scatter.png` | Per-property scatter against F1 with regression line and Pearson r                    |
+| `correlation_heatmap.png` | Property × property Pearson r matrix (self-correlations blanked)                      |
+| `worst_images_strip.png`  | Thumbnails of bottom 20 by F1 with green ground-truth and red dashed prediction boxes |
 
 ## Example outputs
 
@@ -80,28 +80,28 @@ See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI 
 
 ## Property catalog and references
 
-| Feature / per-image field | Source |
-|---|---|
-| `brightness` (HSP perceptual) | [Hendrycks & Dietterich, ICLR 2019](https://arxiv.org/abs/1903.12261) |
-| `dark_pixel_ratio`, `bright_pixel_ratio` | [Hendrycks & Dietterich, ICLR 2019](https://arxiv.org/abs/1903.12261) |
-| `blurriness` (variance-of-Laplacian) | [Pech-Pacheco et al., ICPR 2000](https://doi.org/10.1109/ICPR.2000.903548) |
-| `entropy` (Shannon over grayscale histogram) | [Shannon, BSTJ 1948](https://doi.org/10.1002/j.1538-7305.1948.tb01338.x) |
-| `contrast` (grayscale std) | [Hendrycks & Dietterich, ICLR 2019](https://arxiv.org/abs/1903.12261) |
-| `edge_density` (Canny edge mean) | [Canny, IEEE TPAMI 1986](https://doi.org/10.1109/TPAMI.1986.4767851) |
-| `sharpness` (Tenengrad gradient) | [Krotkov, IJCV 1988](https://doi.org/10.1007/BF00127822) |
-| `aspect_ratio`, `width`, `height`, `total_pixels`, `num_objects` | trivial |
-| `num_small` / `num_medium` / `num_large` (COCO area buckets 32², 96²) | [Lin et al., COCO, ECCV 2014](https://arxiv.org/abs/1405.0312) |
-| `small_object_ratio`, `box_area_std_norm`, `object_scale_variance` | trivial |
-| `num_classes_present` | trivial |
-| `class_entropy` | [Shannon, BSTJ 1948](https://doi.org/10.1002/j.1538-7305.1948.tb01338.x) |
-| `mean_center_x`, `mean_center_y`, `center_spread` | trivial |
-| `num_near_edge` (boundary-truncated objects) | [Everingham et al., Pascal VOC, IJCV 2010](https://link.springer.com/article/10.1007/s11263-009-0275-4) |
-| `max_pairwise_iou`, `mean_pairwise_iou` (per-image crowdedness) | [Shao et al., CrowdHuman, 2018](https://arxiv.org/abs/1805.00123) |
-| `overlooked_score`, `badloc_score`, `swap_score`, `label_quality_score` (ObjectLab) | [Tkachenko, Thyagarajan & Mueller, ICML Workshop 2023](https://arxiv.org/abs/2309.00832) |
-| Per-image P/R/F1/TP/FP/FN | in-tree validator |
-| Pearson + Spearman correlation per property × F1 with effect-size band | [Pearson, Proc. Royal Society 1895](https://doi.org/10.1098/rspl.1895.0041) / [Spearman, Am. J. Psychology 1904](https://doi.org/10.2307/1412159) |
-| Worst-image ranking + scatter grid + heatmap + worst-image strip plots + `summary.md` | in-tree |
-| `ul://` platform-URI resolution for model + dataset inputs | [Ultralytics Platform API docs](https://docs.ultralytics.com/platform/api/) |
+| Feature / per-image field                                                             | Source                                                                                                                                            |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `brightness` (HSP perceptual)                                                         | [Hendrycks & Dietterich, ICLR 2019](https://arxiv.org/abs/1903.12261)                                                                             |
+| `dark_pixel_ratio`, `bright_pixel_ratio`                                              | [Hendrycks & Dietterich, ICLR 2019](https://arxiv.org/abs/1903.12261)                                                                             |
+| `blurriness` (variance-of-Laplacian)                                                  | [Pech-Pacheco et al., ICPR 2000](https://doi.org/10.1109/ICPR.2000.903548)                                                                        |
+| `entropy` (Shannon over grayscale histogram)                                          | [Shannon, BSTJ 1948](https://doi.org/10.1002/j.1538-7305.1948.tb01338.x)                                                                          |
+| `contrast` (grayscale std)                                                            | [Hendrycks & Dietterich, ICLR 2019](https://arxiv.org/abs/1903.12261)                                                                             |
+| `edge_density` (Canny edge mean)                                                      | [Canny, IEEE TPAMI 1986](https://doi.org/10.1109/TPAMI.1986.4767851)                                                                              |
+| `sharpness` (Tenengrad gradient)                                                      | [Krotkov, IJCV 1988](https://doi.org/10.1007/BF00127822)                                                                                          |
+| `aspect_ratio`, `width`, `height`, `total_pixels`, `num_objects`                      | trivial                                                                                                                                           |
+| `num_small` / `num_medium` / `num_large` (COCO area buckets 32², 96²)                 | [Lin et al., COCO, ECCV 2014](https://arxiv.org/abs/1405.0312)                                                                                    |
+| `small_object_ratio`, `box_area_std_norm`, `object_scale_variance`                    | trivial                                                                                                                                           |
+| `num_classes_present`                                                                 | trivial                                                                                                                                           |
+| `class_entropy`                                                                       | [Shannon, BSTJ 1948](https://doi.org/10.1002/j.1538-7305.1948.tb01338.x)                                                                          |
+| `mean_center_x`, `mean_center_y`, `center_spread`                                     | trivial                                                                                                                                           |
+| `num_near_edge` (boundary-truncated objects)                                          | [Everingham et al., Pascal VOC, IJCV 2010](https://link.springer.com/article/10.1007/s11263-009-0275-4)                                           |
+| `max_pairwise_iou`, `mean_pairwise_iou` (per-image crowdedness)                       | [Shao et al., CrowdHuman, 2018](https://arxiv.org/abs/1805.00123)                                                                                 |
+| `overlooked_score`, `badloc_score`, `swap_score`, `label_quality_score` (ObjectLab)   | [Tkachenko, Thyagarajan & Mueller, ICML Workshop 2023](https://arxiv.org/abs/2309.00832)                                                          |
+| Per-image P/R/F1/TP/FP/FN                                                             | in-tree validator                                                                                                                                 |
+| Pearson + Spearman correlation per property × F1 with effect-size band                | [Pearson, Proc. Royal Society 1895](https://doi.org/10.1098/rspl.1895.0041) / [Spearman, Am. J. Psychology 1904](https://doi.org/10.2307/1412159) |
+| Worst-image ranking + scatter grid + heatmap + worst-image strip plots + `summary.md` | in-tree                                                                                                                                           |
+| `ul://` platform-URI resolution for model + dataset inputs                            | [Ultralytics Platform API docs](https://docs.ultralytics.com/platform/api/)                                                                       |
 
 ## Output schema
 
@@ -111,11 +111,15 @@ See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI 
 
 ```json
 {
-  "brightness": {
-    "pearson_r": -0.34, "pearson_p": 1.2e-5,
-    "spearman_r": -0.31, "spearman_p": 3.4e-5,
-    "n": 458, "effect_band": "moderate", "direction": "higher brightness → lower F1"
-  }
+    "brightness": {
+        "pearson_r": -0.34,
+        "pearson_p": 1.2e-5,
+        "spearman_r": -0.31,
+        "spearman_p": 3.4e-5,
+        "n": 458,
+        "effect_band": "moderate",
+        "direction": "higher brightness → lower F1"
+    }
 }
 ```
 
@@ -123,14 +127,18 @@ See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI 
 
 ```json
 [
-  {"im_name": "img_0042.jpg", "f1": 0.12, "anomaly_score": 2.31,
-   "top_3_problematic": ["blurriness", "num_small", "num_near_edge"]}
+    {
+        "im_name": "img_0042.jpg",
+        "f1": 0.12,
+        "anomaly_score": 2.31,
+        "top_3_problematic": ["blurriness", "num_small", "num_near_edge"]
+    }
 ]
 ```
 
 ## Acting on the results
 
-The report surfaces *which* image properties drive low per-image F1. Common follow-ups:
+The report surfaces _which_ image properties drive low per-image F1. Common follow-ups:
 
 - **Crowdedness / object count**: if `num_objects`, `max_pairwise_iou`, or `small_object_ratio` correlate with low F1, your model struggles in dense scenes. Consider raising `imgsz`, training with more crowded-scene augmentation (mosaic, copy-paste), or generating synthetic crowded scenes targeting the worst images.
 - **Object scale spread**: if `object_scale_variance` or `num_small` correlate with low F1, multi-scale predictions are weak. Tune anchor-free head capacity or add tiled-inference for small targets.
