@@ -99,7 +99,7 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             ``pearson_p``, ``spearman_r``, ``spearman_p``, ``n``, ``effect_band``, ``direction``.
         save_dir (Path): Output directory for CSV / JSON / plots / summary.md.
         has_predictions (bool): True when prediction-quality columns are populated.
-        names (dict[int, str] | None): Optional class id → name mapping used to label boxes on the worst-image strip.
+        names (dict[int, str] | None): Optional class id to name mapping used to label boxes on the worst-image strip.
     """
 
     per_image: dict[str, dict] = field(default_factory=dict)
@@ -133,11 +133,12 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             rows.append(out)
         return rows
 
-    def plot(self, save_dir: Path | str | None = None) -> None:
-        """Render scatter grid (F1 vs property), property×property heatmap, and worst-image strip.
+    def plot(self, save_dir: Path | str | None = None, n_strip: int = 20) -> None:
+        """Render scatter grid (F1 vs property), property correlation heatmap, and worst-image strip.
 
         Args:
             save_dir (Path | str, optional): Directory to write PNGs into.
+            n_strip (int, optional): Number of thumbnails on the worst-image strip plot.
         """
         import matplotlib.pyplot as plt  # scope for faster 'import ultralytics'
 
@@ -154,9 +155,9 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             nrows = (len(plotted_props) + ncols - 1) // ncols
             fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 3.2, nrows * 2.8))
             axes = np.atleast_2d(axes).ravel()
+            ys = np.array([v.get("f1", np.nan) for v in scored], dtype=float)
             for ax, prop in zip(axes, plotted_props):
                 xs = np.array([v.get(prop, np.nan) for v in scored], dtype=float)
-                ys = np.array([v.get("f1", np.nan) for v in scored], dtype=float)
                 m = np.isfinite(xs) & np.isfinite(ys)
                 ax.scatter(xs[m], ys[m], s=4, alpha=0.5, c="tab:blue")
                 if m.sum() > 1 and np.std(xs[m]) > 0:
@@ -184,13 +185,13 @@ class AnalysisReport(SimpleClass, DataExportMixin):
         mat = np.full((len(prop_columns), len(prop_columns)), np.nan)
         cols = {p: np.array([v.get(p, np.nan) for v in scored], dtype=float) for p in prop_columns}
         for i, p1 in enumerate(prop_columns):
-            for j, p2 in enumerate(prop_columns):
-                if i == j:
-                    continue  # skip self-correlation so the diagonal does not dominate the color scale
-                a, b = cols[p1], cols[p2]
+            for j in range(i + 1, len(prop_columns)):  # upper triangle only, mirror to lower (Pearson r is symmetric)
+                a, b = cols[p1], cols[prop_columns[j]]
                 m = np.isfinite(a) & np.isfinite(b)
                 if m.sum() >= 30 and np.std(a[m]) > 0 and np.std(b[m]) > 0:
-                    mat[i, j] = float(np.corrcoef(a[m], b[m])[0, 1])
+                    r = float(np.corrcoef(a[m], b[m])[0, 1])
+                    mat[i, j] = r
+                    mat[j, i] = r
         fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(prop_columns)), max(5, 0.4 * len(prop_columns))))
         cmap = plt.get_cmap("RdBu_r").copy()
         cmap.set_bad(color="white")
@@ -200,7 +201,7 @@ class AnalysisReport(SimpleClass, DataExportMixin):
         ax.set_yticks(range(len(prop_columns)))
         ax.set_yticklabels(prop_columns, fontsize=7)
         ax.set_title(
-            "Property × property correlation matrix (Pearson r)\n"
+            "Property correlation matrix (Pearson r)\n"
             "red = positively correlated, blue = negatively correlated, white = self/undefined",
             fontsize=10,
         )
@@ -212,7 +213,7 @@ class AnalysisReport(SimpleClass, DataExportMixin):
         worst = sorted(
             (v for v in scored if v.get("im_path")),
             key=lambda v: _worst_record_score(v, self.has_predictions),
-        )[:20]
+        )[:n_strip]
         if worst:
             from matplotlib.patches import Rectangle  # scope for faster 'import ultralytics'
 
@@ -262,11 +263,12 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             fig.savefig(out_dir / "worst_images_strip.png", dpi=140)
             plt.close(fig)
 
-    def write_summary_md(self, save_dir: Path | str | None = None) -> None:
+    def write_summary_md(self, save_dir: Path | str | None = None, n_strip: int = 20) -> None:
         """Write a plain-English ``summary.md`` with a headline finding, top correlations, worst images, and plots.
 
         Args:
             save_dir (Path | str, optional): Directory to write into.
+            n_strip (int, optional): Number of worst-image rows shown in the summary table.
         """
         out_dir = Path(save_dir or self.save_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -276,7 +278,9 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             reverse=True,
         )
         top_corr = ranked_corr[:3]
-        worst = sorted(self.per_image.items(), key=lambda kv: _worst_record_score(kv[1], self.has_predictions))[:20]
+        worst = sorted(self.per_image.items(), key=lambda kv: _worst_record_score(kv[1], self.has_predictions))[
+            :n_strip
+        ]
 
         lines = [
             "# Image Property Analysis Report",
@@ -319,7 +323,7 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             )
         lines += [
             "- **Property correlation heatmap** (`correlation_heatmap.png`): how each pair of properties moves together.",
-            "- **Worst-image strip** (`worst_images_strip.png`): the 20 worst images with **green** ground-truth boxes and **red dashed** model predictions.",
+            f"- **Worst-image strip** (`worst_images_strip.png`): the {len(worst)} worst images with **green** ground-truth boxes and **red dashed** model predictions.",
         ]
 
         notes: list[str] = []
@@ -343,14 +347,14 @@ class AnalysisReport(SimpleClass, DataExportMixin):
         notes.extend(
             [
                 "**Strength** is based on the Spearman rank correlation magnitude: "
-                "strong (≥0.5), moderate (≥0.3), weak (≥0.1), otherwise negligible. Full numeric correlations are "
+                "strong (>=0.5), moderate (>=0.3), weak (>=0.1), otherwise negligible. Full numeric correlations are "
                 "available in `correlations.json` and `per_image_analysis.csv`.",
                 "Property definitions, how to interpret each score, and suggestions for improving your model or "
                 "dataset from these results are in the [analysis guide](https://docs.ultralytics.com/guides/analysis/).",
             ]
         )
         lines += ["", "## How to read this report", ""] + [f"- {n}" for n in notes]
-        (out_dir / "summary.md").write_text("\n".join(lines) + "\n")
+        (out_dir / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 class ImagePropertyAnalyzer:
@@ -428,8 +432,12 @@ class ImagePropertyAnalyzer:
         """
         return cls(metrics=metrics, dataset=dataset, save_dir=save_dir)
 
-    def run(self) -> AnalysisReport:
+    def run(self, n_worst: int = 100, n_strip: int = 20) -> AnalysisReport:
         """Resolve inputs, extract properties, compute correlations, rank images, write outputs.
+
+        Args:
+            n_worst (int, optional): Number of worst-performing images saved in ``worst_images.json``.
+            n_strip (int, optional): Number of thumbnails on the worst-image strip plot.
 
         Returns:
             (AnalysisReport): A fully populated report. Outputs (CSV/JSON/plots/summary.md) are also written under
@@ -462,12 +470,16 @@ class ImagePropertyAnalyzer:
             has_predictions=has_predictions,
             names=names,
         )
-        (self.save_dir / "per_image_analysis.csv").write_text(report.to_csv())
-        (self.save_dir / "correlations.json").write_text(json.dumps(correlations, indent=2, default=_json_default))
-        worst = self._top_worst_records(per_image, has_predictions, top_n=100)
-        (self.save_dir / "worst_images.json").write_text(json.dumps(worst, indent=2, default=_json_default))
-        report.plot()
-        report.write_summary_md()
+        (self.save_dir / "per_image_analysis.csv").write_text(report.to_csv(), encoding="utf-8")
+        (self.save_dir / "correlations.json").write_text(
+            json.dumps(correlations, indent=2, default=_json_default), encoding="utf-8"
+        )
+        worst = self._top_worst_records(per_image, has_predictions, top_n=n_worst)
+        (self.save_dir / "worst_images.json").write_text(
+            json.dumps(worst, indent=2, default=_json_default), encoding="utf-8"
+        )
+        report.plot(n_strip=n_strip)
+        report.write_summary_md(n_strip=n_strip)
         return report
 
     def _resolve_inputs(self) -> tuple[dict, Any, bool]:
@@ -523,7 +535,7 @@ class ImagePropertyAnalyzer:
         c = Counter(Path(p).name for p in getattr(dataset, "im_files", []))
         dups = [(name, n) for name, n in c.items() if n > 1]
         if dups:
-            sample = ", ".join(f"{n}×{name}" for name, n in dups[:3])
+            sample = ", ".join(f"{n}x {name}" for name, n in dups[:3])
             LOGGER.warning(
                 f"ImagePropertyAnalyzer: {len(dups)} duplicate basename(s) in dataset, e.g. {sample}. "
                 f"Per-image records keyed by basename will collide silently."
@@ -706,7 +718,7 @@ class ImagePropertyAnalyzer:
 
     @staticmethod
     def _compute_correlations(per_image: dict, has_predictions: bool) -> dict[str, dict]:
-        """Run Pearson + Spearman per property × F1 with effect-size band and direction string."""
+        """Run Pearson + Spearman per property vs F1 with effect-size band and direction string."""
         if not has_predictions:
             return {}
         from scipy.stats import pearsonr, spearmanr  # scope for faster 'import ultralytics'
@@ -804,10 +816,10 @@ def _strength_band(r: float | None) -> str:
 
 
 def _direction_phrase(prop: str, r: float | None) -> str:
-    """Render a correlation direction using the raw property name (`higher num_objects → lower F1`)."""
+    """Render a correlation direction using the raw property name (`higher num_objects -> lower F1`)."""
     if r is None or abs(r) < 0.1:
         return "no clear effect"
-    return f"higher {prop} → lower F1" if r < 0 else f"higher {prop} → higher F1"
+    return f"higher {prop} -> lower F1" if r < 0 else f"higher {prop} -> higher F1"
 
 
 def _worst_record_score(rec: dict, has_predictions: bool) -> tuple[float, float]:
@@ -904,7 +916,7 @@ def compute_objectlab_scores(
 def _softmin1d(scores: np.ndarray, T: float) -> float:
     """Softmin-pool a 1D score array as the softmax-weighted mean.
 
-    Weights are ``softmax(-scores / T)`` (lower scores get higher weight). Result is the dot product ``weights ·
+    Weights are ``softmax(-scores / T)`` (lower scores get higher weight). Result is the dot product ``weights .
     scores``. As ``T`` decreases, the result approaches ``min(scores)``. As ``T`` increases, it approaches the
     arithmetic mean. The result stays inside ``[min, max]`` of the input.
 

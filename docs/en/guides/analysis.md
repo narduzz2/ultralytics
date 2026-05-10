@@ -118,7 +118,7 @@ See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI 
         "spearman_p": 3.4e-5,
         "n": 458,
         "effect_band": "moderate",
-        "direction": "higher brightness → lower F1"
+        "direction": "higher brightness -> lower F1"
     }
 }
 ```
