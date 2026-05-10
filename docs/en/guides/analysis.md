@@ -39,8 +39,18 @@ Each call writes the following to a timestamped `runs/analysis/` directory:
 | `worst_images.json` | Top 100 worst-performing images plus their top 3 problematic properties |
 | `summary.md` | Human-readable summary with top correlations and worst-image table |
 | `correlation_scatter.png` | Per-property scatter against F1 with regression line and Pearson r |
-| `correlation_heatmap.png` | Property × property + F1 correlation matrix |
-| `worst_images_strip.png` | Thumbnails of bottom 20 by F1 with property values overlaid |
+| `correlation_heatmap.png` | Property × property Pearson r matrix (self-correlations blanked) |
+| `worst_images_strip.png` | Thumbnails of bottom 20 by F1 with green ground-truth and red dashed prediction boxes |
+
+## Example outputs
+
+Rendered on COCO val2017 (5000 images) with `yolo11n.pt` at `conf=0.25`. `summary.md` reports the strongest correlates (object count, object size variation, small-object count) in plain English and links the three plots:
+
+![F1 vs each property](https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/image-property-correlation-scatter.avif)
+
+![Property correlation heatmap](https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/image-property-correlation-heatmap.avif)
+
+![Worst 20 images](https://cdn.jsdelivr.net/gh/ultralytics/assets@main/docs/image-property-worst-images-strip.avif)
 
 ## Enabling label-quality scores
 
@@ -66,7 +76,7 @@ ImagePropertyAnalyzer(
 ).run()
 ```
 
-See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI details. The legacy `https://hub.ultralytics.com/models/<id>` URL form is deprecated for this module and emits a one-line warning.
+See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI details.
 
 ## Property catalog and references
 
@@ -104,7 +114,7 @@ See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI 
   "brightness": {
     "pearson_r": -0.34, "pearson_p": 1.2e-5,
     "spearman_r": -0.31, "spearman_p": 3.4e-5,
-    "n": 458, "effect_band": "moderate", "direction": "low brightness => low f1"
+    "n": 458, "effect_band": "moderate", "direction": "higher brightness → lower F1"
   }
 }
 ```
@@ -118,9 +128,21 @@ See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI 
 ]
 ```
 
+## Acting on the results
+
+The report surfaces *which* image properties drive low per-image F1. Common follow-ups:
+
+- **Crowdedness / object count**: if `num_objects`, `max_pairwise_iou`, or `small_object_ratio` correlate with low F1, your model struggles in dense scenes. Consider raising `imgsz`, training with more crowded-scene augmentation (mosaic, copy-paste), or generating synthetic crowded scenes targeting the worst images.
+- **Object scale spread**: if `object_scale_variance` or `num_small` correlate with low F1, multi-scale predictions are weak. Tune anchor-free head capacity or add tiled-inference for small targets.
+- **Pixel-level corruptions**: brightness/contrast/blurriness/`dark_pixel_ratio` correlations point at exposure or motion-blur issues. Augment with the corresponding [Albumentations](../integrations/albumentations.md) transforms, or retrain after curating examples with similar properties.
+- **Label-quality scores** (`overlooked_score`, `badloc_score`, `swap_score`, `label_quality_score`): low scores flag specific annotation issues per image. Review the listed worst images, fix labels, and retrain.
+- **Worst-image triage**: the listed worst images are direct candidates for synthetic-data targets: generate variants with the highlighted properties amplified, label them, and add to the training set.
+
+The `anomaly_score` per image is a signed z-score average across all properties, weighted so positive = unusual in an F1-degrading direction. Treat large positive values as "this image is statistically the kind of input your model struggles with."
+
 ## Caveats
 
 - **Filename collisions**: `Metric.image_metrics` is keyed by image basename. If your dataset has duplicate basenames across subdirectories they collide silently. The analyzer emits a single `LOGGER.warning` listing the count and a few examples.
 - **Empty-label images**: zero-box images break per-image-box stats (mean undefined). The analyzer emits `NaN` for those properties and excludes them from correlations.
-- **Tasks supported**: 27 image-property fields work for any of detection / segmentation / pose / OBB. The 4 ObjectLab fields ship for **detection + OBB only** (segmentation and pose extension via mask-IoU and OKS-based similarity is deferred to a follow-up release).
+- **Tasks supported**: 27 image-property fields work for any of detection / segmentation / pose / OBB. The 4 ObjectLab fields ship for **detection only** (segmentation, pose, and OBB extensions via mask-IoU, OKS, and rotated-box similarity are deferred to a follow-up release).
 - **DDP**: the validator-side retention path is rank-0 safe, the existing `dist.gather_object` plumbing pickles numpy arrays cleanly without new logic.

@@ -10,7 +10,7 @@ import pytest
 matplotlib.use("Agg")  # headless, must come before any pyplot import in tests
 
 from ultralytics import YOLO
-from ultralytics.utils.analysis import ImagePropertyAnalyzer, _compute_objectlab_scores, _softmin1d
+from ultralytics.utils.analysis import ImagePropertyAnalyzer, _softmin1d, compute_objectlab_scores
 from ultralytics.utils.ops import xywhn2xyxy
 
 
@@ -79,7 +79,7 @@ def test_sharpness_higher_for_step_edge():
 
 
 def test_pairwise_iou_stats_three_box_example():
-    """Two overlapping boxes yield max IoU in (0.1, 0.5); a third disjoint box doesn't increase it."""
+    """Two overlapping boxes yield max IoU in (0.1, 0.5), a third disjoint box doesn't increase it."""
     boxes = np.array([[0, 0, 10, 10], [5, 5, 15, 15], [100, 100, 110, 110]], dtype=np.float32)
     max_iou, _ = ImagePropertyAnalyzer._pairwise_iou_stats(boxes)
     assert 0.1 < max_iou < 0.5
@@ -115,7 +115,7 @@ def test_softmin1d_uniform_returns_constant():
 
 def test_objectlab_clean_image_returns_high_quality():
     """An image where every GT has a matched same-class high-conf prediction returns near-1.0 quality."""
-    out = _compute_objectlab_scores(
+    out = compute_objectlab_scores(
         iou=np.array([[1.0, 0.0], [0.0, 1.0]]),
         pred_bb=np.array([[0, 0, 10, 10], [50, 50, 60, 60]], dtype=np.float32),
         pred_cls=np.array([0, 1]),
@@ -131,7 +131,7 @@ def test_objectlab_clean_image_returns_high_quality():
 
 def test_objectlab_swap_drops_quality():
     """A high-confidence different-class prediction overlapping a GT triggers a low swap score."""
-    out = _compute_objectlab_scores(
+    out = compute_objectlab_scores(
         iou=np.array([[1.0]]),
         pred_bb=np.array([[0, 0, 10, 10]], dtype=np.float32),
         pred_cls=np.array([1]),
@@ -197,16 +197,3 @@ def test_lazy_matplotlib_import():
     if "matplotlib" in sys.modules:
         pytest.skip("matplotlib was loaded by a previous test, cannot verify discipline here")
     assert "matplotlib" not in sys.modules
-
-
-def test_legacy_hub_url_warning(monkeypatch):
-    """Legacy hub.ultralytics.com URLs trigger a deprecation warning but don't raise."""
-    from ultralytics.utils import analysis as analysis_module
-
-    captured = []
-    monkeypatch.setattr(analysis_module.LOGGER, "warning", lambda msg: captured.append(msg))
-    try:
-        ImagePropertyAnalyzer(model="https://hub.ultralytics.com/models/abc123", data="coco128.yaml")
-    except Exception:
-        pass  # we're only checking the warning was emitted
-    assert any("deprecated" in m.lower() for m in captured)

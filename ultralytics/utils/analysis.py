@@ -37,7 +37,7 @@ import torch
 
 from ultralytics.utils import LOGGER, NUM_THREADS, SETTINGS, TQDM, DataExportMixin, SimpleClass
 from ultralytics.utils.metrics import box_iou
-from ultralytics.utils.ops import xywhn2xyxy
+from ultralytics.utils.ops import xywh2xyxy, xywhn2xyxy
 from ultralytics.utils.patches import imread
 
 COCO_AREA_SMALL = 32**2  # COCO small-object area threshold (px^2), Lin et al. 2014
@@ -98,12 +98,14 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             ``pearson_p``, ``spearman_r``, ``spearman_p``, ``n``, ``effect_band``, ``direction``.
         save_dir (Path): Output directory for CSV / JSON / plots / summary.md.
         has_predictions (bool): True when prediction-quality columns are populated.
+        names (dict[int, str] | None): Optional class id → name mapping used to label boxes on the worst-image strip.
     """
 
     per_image: dict[str, dict] = field(default_factory=dict)
     correlations: dict[str, dict] = field(default_factory=dict)
     save_dir: Path = field(default_factory=Path)
     has_predictions: bool = False
+    names: dict[int, str] | None = None
 
     def summary(self, normalize: bool = False, decimals: int = 5) -> list[dict]:
         """Return per-image summary rows for ``DataExportMixin`` (powers ``to_csv``/``to_json``/``to_df``).
@@ -168,7 +170,12 @@ class AnalysisReport(SimpleClass, DataExportMixin):
                 ax.tick_params(axis="both", labelsize=6)
             for ax in axes[len(plotted_props) :]:
                 ax.set_visible(False)
-            fig.tight_layout()
+            fig.suptitle(
+                "Per-image F1 vs each property (one dot = one image, red line = linear fit, r = Pearson)",
+                fontsize=10,
+                y=0.995,
+            )
+            fig.tight_layout(rect=(0, 0, 1, 0.99))
             fig.savefig(out_dir / "correlation_scatter.png", dpi=120)
             plt.close(fig)
 
@@ -177,17 +184,26 @@ class AnalysisReport(SimpleClass, DataExportMixin):
         cols = {p: np.array([v.get(p, np.nan) for v in scored], dtype=float) for p in prop_columns}
         for i, p1 in enumerate(prop_columns):
             for j, p2 in enumerate(prop_columns):
+                if i == j:
+                    continue  # skip self-correlation so the diagonal does not dominate the color scale
                 a, b = cols[p1], cols[p2]
                 m = np.isfinite(a) & np.isfinite(b)
                 if m.sum() >= 30 and np.std(a[m]) > 0 and np.std(b[m]) > 0:
                     mat[i, j] = float(np.corrcoef(a[m], b[m])[0, 1])
         fig, ax = plt.subplots(figsize=(max(6, 0.4 * len(prop_columns)), max(5, 0.4 * len(prop_columns))))
-        im = ax.imshow(mat, cmap="RdBu_r", vmin=-1, vmax=1)
+        cmap = plt.get_cmap("RdBu_r").copy()
+        cmap.set_bad(color="white")
+        im = ax.imshow(mat, cmap=cmap, vmin=-1, vmax=1)
         ax.set_xticks(range(len(prop_columns)))
         ax.set_xticklabels(prop_columns, rotation=70, fontsize=7, ha="right")
         ax.set_yticks(range(len(prop_columns)))
         ax.set_yticklabels(prop_columns, fontsize=7)
-        fig.colorbar(im, ax=ax, fraction=0.04)
+        ax.set_title(
+            "Property × property correlation matrix (Pearson r)\n"
+            "red = positively correlated, blue = negatively correlated, white = self/undefined",
+            fontsize=10,
+        )
+        fig.colorbar(im, ax=ax, fraction=0.04, label="Pearson r")
         fig.tight_layout()
         fig.savefig(out_dir / "correlation_heatmap.png", dpi=120)
         plt.close(fig)
@@ -197,23 +213,56 @@ class AnalysisReport(SimpleClass, DataExportMixin):
             key=lambda v: _worst_record_score(v, self.has_predictions),
         )[:20]
         if worst:
-            n = len(worst)
-            fig, axes = plt.subplots(1, n, figsize=(n * 2, 2.6))
-            axes = np.atleast_1d(axes)
+            from matplotlib.patches import Rectangle  # scope for faster 'import ultralytics'
+
+            ncols = 5
+            nrows = (len(worst) + ncols - 1) // ncols
+            fig, axes = plt.subplots(nrows, ncols, figsize=(ncols * 3.4, nrows * 3.0))
+            axes = np.atleast_1d(axes).ravel()
             for ax, rec in zip(axes, worst):
                 img = imread(rec["im_path"])
-                if img is not None:
-                    ax.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                if img is None:
+                    continue
+                ax.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
                 ax.set_xticks([])
                 ax.set_yticks([])
-                tag = f"f1={rec['f1']:.2f}" if self.has_predictions else f"a={rec['anomaly_score']:.2f}"
-                ax.set_title(f"{Path(rec['im_path']).stem[:14]}\n{tag}", fontsize=7)
-            fig.tight_layout()
-            fig.savefig(out_dir / "worst_images_strip.png", dpi=120)
+                for box in rec.get("gt_bboxes", []) if self.has_predictions else []:
+                    x1, y1, x2, y2 = box
+                    ax.add_patch(Rectangle((x1, y1), x2 - x1, y2 - y1, lw=1.2, ec="lime", fc="none"))
+                pred_bb = rec.get("pred_bboxes", []) if self.has_predictions else []
+                pred_conf = rec.get("pred_conf", []) if self.has_predictions else []
+                pred_cls = rec.get("pred_cls", []) if self.has_predictions else []
+                for box, conf, cid in zip(pred_bb, pred_conf, pred_cls):
+                    x1, y1, x2, y2 = box
+                    ax.add_patch(Rectangle((x1, y1), x2 - x1, y2 - y1, lw=1.2, ec="red", fc="none", ls="--"))
+                    label = self.names.get(int(cid), str(int(cid))) if self.names else str(int(cid))
+                    ax.text(
+                        x1,
+                        max(y1 - 4, 10),
+                        f"{label} {conf:.2f}",
+                        fontsize=7,
+                        color="red",
+                        bbox={"facecolor": "white", "alpha": 0.7, "pad": 0.6, "edgecolor": "none"},
+                    )
+                tag = f"F1={rec['f1']:.2f}" if self.has_predictions else f"anomaly={rec['anomaly_score']:.2f}"
+                ax.set_title(f"{Path(rec['im_path']).stem}\n{tag}", fontsize=8)
+            for ax in axes[len(worst) :]:
+                ax.set_visible(False)
+            if self.has_predictions:
+                fig.suptitle(
+                    f"{len(worst)} worst-performing images (lowest F1). Green = ground truth, red dashed = model "
+                    f"predictions.",
+                    fontsize=11,
+                    y=0.995,
+                )
+            else:
+                fig.suptitle(f"{len(worst)} most anomalous images (highest anomaly score)", fontsize=11, y=0.995)
+            fig.tight_layout(rect=(0, 0, 1, 0.985))
+            fig.savefig(out_dir / "worst_images_strip.png", dpi=140)
             plt.close(fig)
 
     def write_summary_md(self, save_dir: Path | str | None = None) -> None:
-        """Write a human-readable ``summary.md`` with top correlations, worst images, and plot links.
+        """Write a plain-English ``summary.md`` with a headline finding, top correlations, worst images, and plots.
 
         Args:
             save_dir (Path | str, optional): Directory to write into.
@@ -229,41 +278,77 @@ class AnalysisReport(SimpleClass, DataExportMixin):
         worst = sorted(self.per_image.items(), key=lambda kv: _worst_record_score(kv[1], self.has_predictions))[:20]
 
         lines = [
-            "# Image Property Analysis Summary",
+            "# Image Property Analysis Report",
             "",
-            f"- Images analyzed: **{len(self.per_image)}**",
-            f"- Predictions available: **{self.has_predictions}**",
+            f"**Dataset:** {len(self.per_image)} images. "
+            f"**Predictions available:** {'yes' if self.has_predictions else 'no'}.",
             "",
-            "## Top 3 properties most correlated with F1",
-            "",
-            "| Property | Spearman r | p-value | Effect | Direction |",
-            "|---|---|---|---|---|",
         ]
-        for prop, c in top_corr:
-            sr, sp = c.get("spearman_r"), c.get("spearman_p")
-            lines.append(
-                f"| `{prop}` | {sr:.3f} | {sp:.2g} | {c['effect_band']} | {c['direction']} |"
-                if sr is not None
-                else f"| `{prop}` | n/a | n/a | n/a | n/a |"
-            )
 
+        if self.has_predictions:
+            lines += ["## Top 3 things that hurt F1", ""]
+            strong_enough = [(p, c) for p, c in top_corr if abs(c.get("spearman_r") or 0) >= 0.1]
+            if strong_enough:
+                for prop, c in strong_enough:
+                    r = c.get("spearman_r")
+                    lines.append(f"- **`{prop}`** ({_strength_band(r)}, {_direction_phrase(prop, r)})")
+            else:
+                lines.append("- No image property strongly predicts F1 in this dataset (all correlations negligible).")
+            lines.append("")
+
+        worst_title = "lowest F1" if self.has_predictions else "most unusual properties"
         lines += [
+            f"## Worst {len(worst)} images ({worst_title})",
             "",
-            f"## Worst {len(worst)} images" + (" (lowest F1)" if self.has_predictions else " (highest anomaly_score)"),
+            "**Why it stands out** lists the properties where this image is most extreme.",
             "",
-            "| Image | F1 | Anomaly | Top problematic |",
-            "|---|---|---|---|",
+            "| Image | F1 | Why it stands out |",
+            "|---|---|---|",
         ]
         for im_name, rec in worst:
-            top3 = ", ".join(rec.get("top_3_problematic", []))
+            top3 = ", ".join(f"`{p}`" for p in rec.get("top_3_problematic", []))
             f1 = rec.get("f1")
             f1_s = f"{f1:.2f}" if isinstance(f1, (int, float)) else "-"
-            lines.append(f"| `{im_name}` | {f1_s} | {rec['anomaly_score']:.2f} | {top3} |")
+            lines.append(f"| `{im_name}` | {f1_s} | {top3} |")
 
         lines += ["", "## Plots", ""]
         if self.has_predictions:
-            lines.append("- ![scatter](correlation_scatter.png)")
-        lines += ["- ![heatmap](correlation_heatmap.png)", "- ![worst](worst_images_strip.png)"]
+            lines.append(
+                "- **F1 vs each property** (`correlation_scatter.png`): one dot per image, red line is a linear fit."
+            )
+        lines += [
+            "- **Property correlation heatmap** (`correlation_heatmap.png`): how each pair of properties moves together.",
+            "- **Worst-image strip** (`worst_images_strip.png`): the 20 worst images with **green** ground-truth boxes and **red dashed** model predictions.",
+        ]
+
+        notes: list[str] = []
+        if self.has_predictions:
+            f1_vals = np.array([r.get("f1", np.nan) for r in self.per_image.values()], dtype=float)
+            median_f1 = float(np.nanmedian(f1_vals)) if np.isfinite(f1_vals).any() else float("nan")
+            lq_present = any(np.isfinite(r.get("label_quality_score", np.nan)) for r in self.per_image.values())
+            if median_f1 < 0.1:
+                notes.append(
+                    f"Per-image F1 median is **{median_f1:.3f}**, which is low. The validator default `conf=0.001` "
+                    f"lets ~300 false positives through per image (max_det), which dominates the F1 denominator. "
+                    f"For meaningful per-image F1 re-run with `model.val(..., conf=0.25)`."
+                )
+            if lq_present:
+                notes.append(
+                    "`label_quality_score` is the geometric mean of `overlooked_score`, `badloc_score`, and "
+                    "`swap_score`. When two of those subtypes saturate at 1.0 on a clean dataset (common on COCO), "
+                    "`label_quality_score` collapses into a monotonic transform of the third, so a near-perfect "
+                    "correlation in the heatmap between it and that subtype is expected."
+                )
+        notes.extend(
+            [
+                "**Strength** is based on the Spearman rank correlation magnitude: "
+                "strong (≥0.5), moderate (≥0.3), weak (≥0.1), otherwise negligible. Full numeric correlations are "
+                "available in `correlations.json` and `per_image_analysis.csv`.",
+                "Property definitions, how to interpret each score, and suggestions for improving your model or "
+                "dataset from these results are in the [analysis guide](https://docs.ultralytics.com/guides/analysis/).",
+            ]
+        )
+        lines += ["", "## How to read this report", ""] + [f"- {n}" for n in notes]
         (out_dir / "summary.md").write_text("\n".join(lines) + "\n")
 
 
@@ -279,6 +364,9 @@ class ImagePropertyAnalyzer:
         device (str | int | None): Inference device.
         workers (int): Dataloader workers for the validation path.
         batch (int): Validation batch size.
+        conf (float): Confidence threshold used when running validation internally (model+data path). The default 0.25
+            matches ``model.predict`` and yields meaningful per-image F1, unlike the validator default 0.001 which
+            saturates max_det=300 and dominates F1 by false positives.
     """
 
     def __init__(
@@ -291,6 +379,7 @@ class ImagePropertyAnalyzer:
         device: str | int | None = None,
         workers: int = 8,
         batch: int = 16,
+        conf: float = 0.25,
         metrics: Any = None,
         dataset: Any = None,
     ):
@@ -305,6 +394,7 @@ class ImagePropertyAnalyzer:
             device (str | int, optional): Inference device.
             workers (int, optional): Dataloader workers.
             batch (int, optional): Validation batch size.
+            conf (float, optional): Confidence threshold for the model+data path's internal ``model.val()`` call.
             metrics (Any, optional): Pre-computed metrics object from ``model.val()`` (skips re-validation).
             dataset (Any, optional): Pre-built dataset instance, used together with ``metrics``.
         """
@@ -312,20 +402,13 @@ class ImagePropertyAnalyzer:
             raise ValueError("ImagePropertyAnalyzer requires 'model'+'data', 'data', or 'metrics'+'dataset'.")
         if api_key:
             SETTINGS["api_key"] = api_key
-        from ultralytics.hub.utils import HUB_WEB_ROOT
-
-        for name, value in (("model", model), ("data", data)):
-            if isinstance(value, str) and value.startswith(HUB_WEB_ROOT):
-                LOGGER.warning(
-                    f"ImagePropertyAnalyzer({name}={value!r}): hub.ultralytics.com URL form is deprecated for "
-                    f"this module. Migrate to 'ul://owner/{{models,datasets}}/<slug>'. Continuing via upstream loader."
-                )
         self.model = model
         self.data = data
         self.imgsz = imgsz
         self.device = device
         self.workers = workers
         self.batch = batch
+        self.conf = conf
         self.save_dir = Path(save_dir or Path("runs/analysis") / datetime.now().strftime("%Y%m%d_%H%M%S"))
         self._metrics_override = metrics
         self._dataset_override = dataset
@@ -355,14 +438,28 @@ class ImagePropertyAnalyzer:
         per_image, dataset, has_predictions = self._resolve_inputs()
         self._check_basename_collisions(dataset)
         self._extract_properties(per_image, dataset)
+        if has_predictions:
+            f1s = np.array([rec.get("f1", np.nan) for rec in per_image.values()], dtype=float)
+            median_f1 = float(np.nanmedian(f1s)) if np.isfinite(f1s).any() else float("nan")
+            if median_f1 < 0.1:
+                LOGGER.warning(
+                    f"ImagePropertyAnalyzer: per-image F1 median is {median_f1:.3f}. "
+                    f"Re-run model.val(..., conf=0.25) for meaningful per-image F1 (see summary.md)."
+                )
         correlations = self._compute_correlations(per_image, has_predictions)
         self._rank_and_score(per_image, correlations, has_predictions)
 
+        names = None
+        if dataset is not None:
+            names = getattr(dataset, "names", None) or (getattr(dataset, "data", {}) or {}).get("names")
+            if names and not isinstance(names, dict):
+                names = dict(enumerate(names))
         report = AnalysisReport(
             per_image=per_image,
             correlations=correlations,
             save_dir=self.save_dir,
             has_predictions=has_predictions,
+            names=names,
         )
         (self.save_dir / "per_image_analysis.csv").write_text(report.to_csv())
         (self.save_dir / "correlations.json").write_text(json.dumps(correlations, indent=2, default=_json_default))
@@ -399,6 +496,7 @@ class ImagePropertyAnalyzer:
             "imgsz": self.imgsz,
             "workers": self.workers,
             "batch": self.batch,
+            "conf": self.conf,
             "analyze_images": True,
             "plots": False,
             "save_json": False,
@@ -479,7 +577,7 @@ class ImagePropertyAnalyzer:
 
     @staticmethod
     def _cache_properties(w: int, h: int, bboxes_n: np.ndarray, cls_arr: np.ndarray) -> dict[str, Any]:
-        """Compute the 17 cache-derived properties from cached W/H, normalized boxes, and class IDs."""
+        """Compute cache-derived properties (counts, sizes, centers, class diversity) from cached W/H and boxes."""
         n = int(bboxes_n.shape[0])
         out: dict[str, Any] = {
             "width": w,
@@ -514,9 +612,8 @@ class ImagePropertyAnalyzer:
         out["num_large"] = int(np.sum(area_px >= COCO_AREA_MEDIUM))
         out["small_object_ratio"] = out["num_small"] / max(n, 1)
 
-        x1, y1 = cx - bw / 2, cy - bh / 2
-        x2, y2 = cx + bw / 2, cy + bh / 2
-        min_edge = np.minimum(np.minimum(x1, y1), np.minimum(1 - x2, 1 - y2))
+        xyxy_n = xywh2xyxy(bboxes_n)
+        min_edge = np.minimum(np.minimum(xyxy_n[:, 0], xyxy_n[:, 1]), np.minimum(1 - xyxy_n[:, 2], 1 - xyxy_n[:, 3]))
         out["num_near_edge"] = int(np.sum(min_edge < EDGE_PROXIMITY_FRAC))
 
         out["mean_center_x"] = float(np.mean(cx))
@@ -631,9 +728,8 @@ class ImagePropertyAnalyzer:
                 continue
             pr = pearsonr(xs[m], f1[m])
             sr = spearmanr(xs[m], f1[m])
-            r_abs = abs(float(sr.correlation))
-            band = "negligible" if r_abs < 0.1 else "small" if r_abs < 0.3 else "moderate" if r_abs < 0.5 else "strong"
-            direction = f"low {prop} => low f1" if float(sr.correlation) > 0 else f"high {prop} => low f1"
+            band = _strength_band(float(sr.correlation))
+            direction = _direction_phrase(prop, float(sr.correlation))
             out[prop] = {
                 "pearson_r": float(pr.statistic),
                 "pearson_p": float(pr.pvalue),
@@ -692,12 +788,41 @@ class ImagePropertyAnalyzer:
         ]
 
 
-def _worst_record_score(rec: dict, has_predictions: bool) -> float:
-    """Sortable score where lower means worse: F1 ascending, or ``-anomaly_score`` when no predictions."""
-    return rec.get("f1", 1.0) if has_predictions else -rec.get("anomaly_score", 0.0)
+def _strength_band(r: float | None) -> str:
+    """Map a Spearman r magnitude to a strength descriptor (negligible/weak/moderate/strong)."""
+    if r is None:
+        return "n/a"
+    a = abs(r)
+    if a >= 0.5:
+        return "strong"
+    if a >= 0.3:
+        return "moderate"
+    if a >= 0.1:
+        return "weak"
+    return "negligible"
 
 
-def _compute_objectlab_scores(
+def _direction_phrase(prop: str, r: float | None) -> str:
+    """Render a correlation direction using the raw property name (`higher num_objects → lower F1`)."""
+    if r is None or abs(r) < 0.1:
+        return "no clear effect"
+    return f"higher {prop} → lower F1" if r < 0 else f"higher {prop} → higher F1"
+
+
+def _worst_record_score(rec: dict, has_predictions: bool) -> tuple[float, float]:
+    """Sortable tuple where lower is worse.
+
+    For prediction-aware paths the primary key is F1 ascending with anomaly score descending as the tiebreak. Empty-GT
+    images (``num_objects == 0``) have undefined per-image F1 and are pushed past every real image so they never pollute
+    the worst-image table. For dataset-only paths the primary key is ``-anomaly_score`` (most anomalous first).
+    """
+    if not has_predictions:
+        return (-float(rec.get("anomaly_score", 0.0)), 0.0)
+    f1 = float("inf") if not rec.get("num_objects", 0) else float(rec.get("f1", 1.0))
+    return (f1, -float(rec.get("anomaly_score", 0.0)))
+
+
+def compute_objectlab_scores(
     iou: np.ndarray,
     pred_bb: np.ndarray,
     pred_cls: np.ndarray,
