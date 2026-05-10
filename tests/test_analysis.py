@@ -2,11 +2,8 @@
 """Tests for the per-image property analysis module."""
 
 import cv2
-import matplotlib
 import numpy as np
 import pytest
-
-matplotlib.use("Agg")  # headless, must come before any pyplot import in tests
 
 from ultralytics import YOLO
 from ultralytics.utils.analysis import ImagePropertyAnalyzer, _softmin1d, compute_objectlab_scores
@@ -182,17 +179,8 @@ def test_run_from_metrics_path(tmp_path):
 
 def test_lazy_matplotlib_import():
     """Importing the analysis module must not pull matplotlib (lazy-loaded inside plot)."""
-    import importlib
+    import subprocess
     import sys
 
-    # Reload to reset module state
-    if "ultralytics.utils.analysis" in sys.modules:
-        del sys.modules["ultralytics.utils.analysis"]
-    sys.modules.pop("matplotlib", None)
-    sys.modules.pop("matplotlib.pyplot", None)
-    importlib.import_module("ultralytics.utils.analysis")
-    # matplotlib may already be loaded by other tests, so we just check that *importing analysis
-    # alone* does not pull it. If the test suite already loaded it, skip.
-    if "matplotlib" in sys.modules:
-        pytest.skip("matplotlib was loaded by a previous test, cannot verify discipline here")
-    assert "matplotlib" not in sys.modules
+    code = "import sys, ultralytics.utils.analysis; sys.exit('matplotlib' in sys.modules)"
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 0
