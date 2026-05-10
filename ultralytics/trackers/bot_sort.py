@@ -13,7 +13,7 @@ from .byte_tracker import BYTETracker, STrack
 from .utils import matching
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYWH
-from .utils.reid import ReID, build_encoder
+from .utils.reid import build_encoder
 
 
 class BOTrack(STrack):

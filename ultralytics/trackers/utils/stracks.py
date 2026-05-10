@@ -7,7 +7,7 @@ implementation exposes (`track_id`, `frame_id`, `start_frame`, `xyxy`, `mean`, `
 
 from __future__ import annotations
 
-__all__ = ("merge_track_pools", "joint_stracks", "sub_stracks", "remove_duplicate_stracks", "multi_gmc")
+__all__ = ("joint_stracks", "merge_track_pools", "multi_gmc", "remove_duplicate_stracks", "sub_stracks")
 
 import numpy as np
 
