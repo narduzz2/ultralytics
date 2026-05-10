@@ -486,7 +486,7 @@ class ImagePropertyAnalyzer:
             data_dict = check_det_dataset(str(data_resolved))
             cfg = get_cfg(overrides={"task": "detect", "imgsz": self.imgsz})
             split = data_dict.get("val") or data_dict.get("test") or data_dict.get("train")
-            dataset = build_yolo_dataset(cfg, str(split), self.batch, data_dict, mode="val", rect=False, stride=32)
+            dataset = build_yolo_dataset(cfg, split, self.batch, data_dict, mode="val", rect=False, stride=32)
             per_image = {Path(p).name: {"im_path": str(p)} for p in dataset.im_files}
             return per_image, dataset, False
 
