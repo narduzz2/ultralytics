@@ -48,9 +48,9 @@ def _hmiou_distance(tracks_a: list, tracks_b: list) -> tuple[np.ndarray, np.ndar
     """Return (iou_sim, 1 - HMIoU) where HMIoU = HIoU * IoU and HIoU is vertical-overlap / vertical-union."""
     n, m = len(tracks_a), len(tracks_b)
     if n == 0 or m == 0:
-        return np.zeros((n, m), dtype=np.float64), np.ones((n, m), dtype=np.float64)
-    boxes_a = np.ascontiguousarray([track.xyxy for track in tracks_a], dtype=np.float64)
-    boxes_b = np.ascontiguousarray([track.xyxy for track in tracks_b], dtype=np.float64)
+        return np.zeros((n, m), dtype=np.float32), np.ones((n, m), dtype=np.float32)
+    boxes_a = np.ascontiguousarray([track.xyxy for track in tracks_a], dtype=np.float32)
+    boxes_b = np.ascontiguousarray([track.xyxy for track in tracks_b], dtype=np.float32)
     iou_sim = bbox_ioa(boxes_a, boxes_b, iou=True)
     h_over = np.minimum(boxes_a[:, 3:4], boxes_b[:, 3:4].T) - np.maximum(boxes_a[:, 1:2], boxes_b[:, 1:2].T)
     h_union = np.maximum(boxes_a[:, 3:4], boxes_b[:, 3:4].T) - np.minimum(boxes_a[:, 1:2], boxes_b[:, 1:2].T)
@@ -62,7 +62,7 @@ def _angle_distance(tracks: list, dets: list, frame_id: int, delta_t: int = 3) -
     """Return angle distance between each track's corner velocities and the track-to-detection direction."""
     n, m = len(tracks), len(dets)
     if n == 0 or m == 0:
-        return np.ones((n, m), dtype=np.float64)
+        return np.ones((n, m), dtype=np.float32)
     track_boxes = np.stack([track.get_history_box(frame_id, delta_t) for track in tracks])  # (N, 4)
     det_boxes = np.stack([det.xyxy for det in dets])  # (M, 4)
     deltas = det_boxes[None] - track_boxes[:, None]  # (N, M, 4)
@@ -80,7 +80,7 @@ def _angle_distance(tracks: list, dets: list, frame_id: int, delta_t: int = 3) -
 def _confidence_distance(tracks: list, dets: list) -> np.ndarray:
     """Absolute difference between each track's projected score and each detection's confidence."""
     if len(tracks) == 0 or len(dets) == 0:
-        return np.ones((len(tracks), len(dets)), dtype=np.float64)
+        return np.ones((len(tracks), len(dets)), dtype=np.float32)
     track_prev_scores = np.array([track.prev_score for track in tracks])
     track_curr_scores = np.array([track.score for track in tracks])
     track_proj_scores = track_curr_scores + (track_curr_scores - track_prev_scores)  # first-order extrapolation
@@ -126,7 +126,7 @@ def _track_aware_nms(tracks: list, dets: list, tai_thr: float, init_thr: float) 
     allow = list(scores > init_thr)
     if len(tracks) + len(dets) < 2:
         return allow
-    boxes = np.ascontiguousarray([obj.xyxy for obj in tracks + dets], dtype=np.float64)
+    boxes = np.ascontiguousarray([obj.xyxy for obj in tracks + dets], dtype=np.float32)
     iou = bbox_ioa(boxes, boxes, iou=True)
     n_tracks = len(tracks)
     n_dets = len(dets)
@@ -215,7 +215,7 @@ def _cosine_distance(tracks: list[TTSTrack], dets: list[TTSTrack]) -> np.ndarray
     """Return cosine distance in `[0, 1]` between track smoothed embeddings and detection current embeddings."""
     n, m = len(tracks), len(dets)
     if n == 0 or m == 0:
-        return np.ones((n, m), dtype=np.float64)
+        return np.ones((n, m), dtype=np.float32)
     dim = 128
     for obj in (*tracks, *dets):
         feat = obj.smooth_feat if obj.smooth_feat is not None else obj.curr_feat
@@ -279,7 +279,7 @@ class TTSTrack(BaseTrack):
         self.idx = xywh[-1]
         self.angle = xywh[4] if len(xywh) == 6 else None
 
-        self.velocity = np.zeros((4, 2), dtype=np.float64)
+        self.velocity = np.zeros((4, 2), dtype=np.float32)
         self._history: deque[tuple[int, np.ndarray]] = deque(maxlen=self._delta_t + 1)
         self.smooth_feat = self.curr_feat = None
         if feat is not None:
@@ -366,7 +366,7 @@ class TTSTrack(BaseTrack):
         )
         self._history.append((frame_id, new_track.xyxy.copy()))
 
-        velocity = np.zeros((4, 2), dtype=np.float64)
+        velocity = np.zeros((4, 2), dtype=np.float32)
         curr_box = new_track.xyxy
         for dt in range(1, self._delta_t + 1):
             delta = curr_box - self.get_history_box(frame_id, dt)
@@ -500,7 +500,7 @@ class TRACKTRACK:
         if self.gmc.method == "sparseOptFlow":
             self.gmc.feature_params["maxCorners"] = get("gmc_max_corners", 200)
         self._gmc_skip = get("gmc_skip_frames", 0)
-        self._gmc_warp = np.eye(2, 3, dtype=np.float64)
+        self._gmc_warp = np.eye(2, 3, dtype=np.float32)
         self._gmc_counter = 0
 
         from .utils.reid import build_encoder
