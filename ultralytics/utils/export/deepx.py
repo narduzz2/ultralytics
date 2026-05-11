@@ -62,6 +62,7 @@ def onnx2deepx(
             "default_loader": {
                 "dataset_path": calib_dir,
                 "file_extensions": ["jpeg", "jpg", "png", "JPEG"],
+                "num_workers": 0,
                 "preprocessings": [
                     {"resize": {"mode": "pad", "size": imgsz[0], "pad_location": "edge", "pad_value": [114, 114, 114]}},
                     {"div": {"x": 255.0}},
