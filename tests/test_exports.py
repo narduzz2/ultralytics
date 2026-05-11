@@ -384,6 +384,7 @@ def test_export_axelera():
     shutil.rmtree(file, ignore_errors=True)  # cleanup
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not LINUX or ARM64, reason="DeepX export only supported on non-aarch64 Linux")
 @pytest.mark.skipif(
     not checks.IS_PYTHON_MINIMUM_3_12, reason="Requires Python>=3.12 for CI validation due to torch upgrades"
