@@ -297,16 +297,16 @@ In addition to all [OC-SORT arguments](#oc-sort-specific-arguments) and the shar
 
 In addition to the shared arguments (`track_high_thresh`, `track_low_thresh`, `new_track_thresh`, `track_buffer`, `match_thresh`, `fuse_score`), FastTracker exposes the following parameters in [`fasttrack.yaml`](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/trackers/fasttrack.yaml):
 
-| **Parameter**               | **Valid Values or Ranges** | **Description**                                                                                                          |
-| --------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `reset_velocity_offset_occ` | `>=0`                      | Number of history frames back to restore the Kalman velocity from on occlusion onset.                                    |
-| `reset_pos_offset_occ`      | `>=0`                      | Number of history frames back to restore the Kalman position from on occlusion onset.                                    |
-| `enlarge_bbox_occ`          | `>=1.0`                    | One-shot height scaling applied to the predicted bbox while occluded so the search region widens (width scales proportionally via XYAH aspect ratio).                               |
-| `dampen_motion_occ`         | `0.0-1.0`                  | Multiplicative factor applied to velocity while occluded. Lower values make the track "slow down" through the occlusion. |
-| `active_occ_to_lost_thresh` | `>=1`                      | Maximum consecutive occluded frames before an active track is moved to the lost pool.                                    |
-| `occ_cover_thresh`          | `0.0-1.0`                  | Fraction of a track's area that must be covered by another active track to declare occlusion.                            |
-| `occ_reappear_window`       | `>=0`                      | Frames a recently-occluded lost track stays preferentially re-findable. Independent of `track_buffer`.                   |
-| `init_iou_suppress`         | `0.0-1.0`                  | Suppress new-track initialization if its IoU with any active track exceeds this. Set to `1.0` to disable suppression.    |
+| **Parameter**               | **Valid Values or Ranges** | **Description**                                                                                                                                       |
+| --------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reset_velocity_offset_occ` | `>=0`                      | Number of history frames back to restore the Kalman velocity from on occlusion onset.                                                                 |
+| `reset_pos_offset_occ`      | `>=0`                      | Number of history frames back to restore the Kalman position from on occlusion onset.                                                                 |
+| `enlarge_bbox_occ`          | `>=1.0`                    | One-shot height scaling applied to the predicted bbox while occluded so the search region widens (width scales proportionally via XYAH aspect ratio). |
+| `dampen_motion_occ`         | `0.0-1.0`                  | Multiplicative factor applied to velocity while occluded. Lower values make the track "slow down" through the occlusion.                              |
+| `active_occ_to_lost_thresh` | `>=1`                      | Maximum consecutive occluded frames before an active track is moved to the lost pool.                                                                 |
+| `occ_cover_thresh`          | `0.0-1.0`                  | Fraction of a track's area that must be covered by another active track to declare occlusion.                                                         |
+| `occ_reappear_window`       | `>=0`                      | Frames a recently-occluded lost track stays preferentially re-findable. Independent of `track_buffer`.                                                |
+| `init_iou_suppress`         | `0.0-1.0`                  | Suppress new-track initialization if its IoU with any active track exceeds this. Set to `1.0` to disable suppression.                                 |
 
 #### Example: running FastTracker
 
