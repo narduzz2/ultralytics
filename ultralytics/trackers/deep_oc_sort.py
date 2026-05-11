@@ -32,7 +32,7 @@ class DeepOCSortTrack(OCSortTrack):
 
     def __init__(
         self,
-        xywh: np.ndarray | list[float],
+        xywh: np.ndarray,
         score: float,
         cls: Any,
         delta_t: int = 3,
@@ -43,7 +43,7 @@ class DeepOCSortTrack(OCSortTrack):
         """Initialize a :class:`DeepOCSortTrack` with optional appearance features.
 
         Args:
-            xywh (list[float]): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format.
+            xywh (np.ndarray): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format.
             score (float): Detection confidence in `[0, 1]`.
             cls (Any): Class label for the detection.
             delta_t (int): Temporal window for OCM velocity direction computation.

@@ -25,11 +25,11 @@ class OCSortTrack(STrack):
         delta_t (int): Temporal window for velocity computation.
     """
 
-    def __init__(self, xywh: np.ndarray | list[float], score: float, cls: Any, delta_t: int = 3):
+    def __init__(self, xywh: np.ndarray, score: float, cls: Any, delta_t: int = 3):
         """Initialize an OCSortTrack with observation storage.
 
         Args:
-            xywh (list[float]): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format.
+            xywh (np.ndarray): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format.
             score (float): Detection confidence in `[0, 1]`.
             cls (Any): Class label for the detection.
             delta_t (int): Temporal window (in frames) used for velocity direction computation.
