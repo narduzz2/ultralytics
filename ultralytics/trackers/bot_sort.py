@@ -191,7 +191,7 @@ class BOTSORT(BYTETracker):
         """Return an instance of KalmanFilterXYWH for predicting and updating object states in the tracking process."""
         return KalmanFilterXYWH()
 
-    def init_track(self, results, img: np.ndarray | torch.Tensor | None = None) -> list[BOTrack]:
+    def init_track(self, results, img: np.ndarray | None = None) -> list[BOTrack]:
         """Initialize object tracks using detection bounding boxes, scores, class labels, and optional ReID features."""
         if len(results) == 0:
             return []

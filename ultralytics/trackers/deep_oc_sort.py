@@ -194,7 +194,7 @@ class DeepOCSORT(OCSORT):
         self.with_reid = getattr(args, "with_reid", False)
         self.encoder = build_encoder(self.with_reid, getattr(args, "model", "auto"))
 
-    def init_track(self, results, img: np.ndarray | torch.Tensor | None = None) -> list[DeepOCSortTrack]:
+    def init_track(self, results, img: np.ndarray | None = None) -> list[DeepOCSortTrack]:
         """Build :class:`DeepOCSortTrack` instances, attaching ReID features when enabled.
 
         When `with_reid=True` and `model="auto"`, `img` should already be a list of native

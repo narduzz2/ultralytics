@@ -147,10 +147,10 @@ def multi_gmc(stracks: list, H: np.ndarray | None = None) -> None:
         >>> warp = gmc.apply(frame, detection_boxes)
         >>> multi_gmc(tracked_stracks, warp)
     """
-    if H is None:
-        H = np.eye(2, 3)
     if not stracks:
         return
+    if H is None:
+        H = np.eye(2, 3)
     multi_mean = np.asarray([st.mean.copy() for st in stracks])
     multi_covariance = np.asarray([st.covariance for st in stracks])
 
