@@ -30,8 +30,7 @@ def merge_track_pools(
     to `removed_buffer` entries.
 
     Args:
-        tracker (Any): Object exposing `tracked_stracks`, `lost_stracks`, `removed_stracks` lists, plus the
-            `joint_stracks` / `sub_stracks` / `remove_duplicate_stracks` helpers.
+        tracker (Any): Object exposing `tracked_stracks`, `lost_stracks`, `removed_stracks` lists.
         activated (list): Tracks updated from the Tracked state this frame.
         refind (list): Tracks re-activated from the Lost state this frame.
         lost (list): Tracks transitioned to Lost this frame.
@@ -70,17 +69,8 @@ def joint_stracks(atracks: list, btracks: list) -> list:
         Merge the currently tracked pool with newly activated tracks
         >>> merged = joint_stracks(tracked_stracks, activated_stracks)
     """
-    exists = {}
-    res = []
-    for t in atracks:
-        exists[t.track_id] = 1
-        res.append(t)
-    for t in btracks:
-        tid = t.track_id
-        if not exists.get(tid, 0):
-            exists[tid] = 1
-            res.append(t)
-    return res
+    a_ids = {t.track_id for t in atracks}
+    return atracks + [t for t in btracks if t.track_id not in a_ids]
 
 
 def sub_stracks(atracks: list, btracks: list) -> list:
@@ -131,16 +121,21 @@ def remove_duplicate_stracks(atracks: list, btracks: list, dup_thresh: float = 0
             dupb.append(q)
         else:
             dupa.append(p)
-    resa = [t for i, t in enumerate(atracks) if i not in dupa]
-    resb = [t for i, t in enumerate(btracks) if i not in dupb]
+    dupa_set, dupb_set = set(dupa), set(dupb)
+    resa = [t for i, t in enumerate(atracks) if i not in dupa_set]
+    resb = [t for i, t in enumerate(btracks) if i not in dupb_set]
     return resa, resb
 
 
-def multi_gmc(stracks: list, H: np.ndarray = np.eye(2, 3)) -> None:
+def multi_gmc(stracks: list, H: np.ndarray | None = None) -> None:
     """Update multiple track positions and covariances using a 2x3 affine homography.
 
     The Kalman state is assumed to be laid out as `(*box, *box_velocity)` with the box center `(x, y)` in the first two
     dims. `R8x8` rotates all four 2-d pairs block- diagonally; the translation `t` is applied only to the position.
+
+    .. warning::
+        This helper assumes the state layout is four spatial/velocity pairs (e.g., XYWH).
+        XYAH trackers must override this behavior.
 
     Args:
         stracks (list[STrack]): Tracks to warp in place; each must expose `mean` (shape (8,)) and `covariance` (shape
@@ -152,6 +147,8 @@ def multi_gmc(stracks: list, H: np.ndarray = np.eye(2, 3)) -> None:
         >>> warp = gmc.apply(frame, detection_boxes)
         >>> multi_gmc(tracked_stracks, warp)
     """
+    if H is None:
+        H = np.eye(2, 3)
     if not stracks:
         return
     multi_mean = np.asarray([st.mean.copy() for st in stracks])
