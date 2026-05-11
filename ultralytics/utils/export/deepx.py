@@ -43,7 +43,7 @@ def onnx2deepx(
     LOGGER.info(f"\n{prefix} starting export with DeepX...")
 
     onnx_file = Path(onnx_file)
-    export_path = Path(f"{onnx_file.stem}_deepx_model")
+    export_path = onnx_file.parent / f"{onnx_file.stem}_deepx_model"
     export_path.mkdir(exist_ok=True)
     config_path = export_path / "config.json"
 
