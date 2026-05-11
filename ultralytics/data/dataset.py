@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from collections import defaultdict
 from itertools import repeat
 from multiprocessing.pool import ThreadPool
@@ -317,28 +319,171 @@ class DepthDataset(YOLODataset):
     Depth maps are stored as .npy files in a parallel directory structure
     (images/train/*.jpg → depth/train/*.npy).
 
+    Honors the BaseDataset ``cache`` parameter for depth labels too:
+
+    - ``cache='disk'`` builds a stacked .npy and ``mmap_mode='r'`` it. RAM-safe at any
+      dataset size; pages are faulted on demand and evicted under memory pressure.
+    - ``cache='ram'`` builds the same stack and fully loads it into RAM. Fastest, but
+      requires ``N × H × W × 4B`` of RAM (e.g. NYU full train ≈ 30 GB).
+    - ``cache=None`` / ``False`` (default) uses per-file ``np.load`` (legacy behavior).
+
+    The cache is only built when every depth map shares a common shape — otherwise
+    the dataset transparently falls back to per-file np.load.
+
     Examples:
-        >>> dataset = DepthDataset(img_path="/data/nyu/images/train", data={"nc": 1})
+        >>> dataset = DepthDataset(img_path="/data/nyu/images/train", data={"nc": 1}, cache="disk")
     """
+
+    def __init__(self, *args, **kwargs):
+        """Initialize and (optionally) build the stacked depth-map cache."""
+        super().__init__(*args, **kwargs)
+        self._depth_stack = None  # ndarray (full RAM) or memmap (lazy), shape (N, H, W)
+        if self.cache in ("ram", "disk"):
+            try:
+                self._build_depth_cache(load_to_ram=(self.cache == "ram"))
+            except Exception as e:
+                LOGGER.warning(f"{self.prefix}depth cache build failed, falling back to per-file load: {e}")
+                self._depth_stack = None
+
+    def _depth_path_for(self, im_file: str) -> str:
+        """Map an image path to its companion depth .npy path.
+
+        Note: matches the legacy substring rewrite which uses forward slashes only.
+        On Windows the input may contain backslashes; both the legacy loader and this
+        cache build will see no matches and silently fall back to the zero-depth path.
+        """
+        d = im_file.replace("/images/", "/depth/")
+        return str(Path(d).with_suffix(".npy"))
+
+    @staticmethod
+    def _depth_hash(files: list[str]) -> str:
+        """Hash depth files by (size, mtime, path). Stronger than utils.get_hash which is size-only.
+
+        Any of: file replaced with same-size content, file touched after a manual edit,
+        or a path reorder will produce a different hash and trigger a cache rebuild.
+        """
+        import hashlib
+        h = hashlib.sha256()
+        for p in files:
+            try:
+                st = os.stat(p)
+                h.update(f"{p}|{st.st_size}|{st.st_mtime_ns}\n".encode())
+            except OSError:
+                h.update(f"{p}|MISSING\n".encode())
+        return h.hexdigest()
+
+    def _build_depth_cache(self, load_to_ram: bool = False):
+        """Build a stacked .npy cache of depth maps for fast random access.
+
+        Layout written to disk (next to the depth split dir):
+            <depth_dir>.cache.npy   - stacked array, shape (N, H, W), float32
+            <depth_dir>.cache.json  - manifest {hash, count, shape}
+
+        Cache is rebuilt only if the manifest is missing or any of {file paths,
+        sizes, mtimes} changed. Skips building if depth shapes vary across the split.
+
+        Multi-rank: build runs only on LOCAL_RANK in {-1, 0}; non-zero ranks wait
+        for the cache file to appear, then mmap it.
+
+        Args:
+            load_to_ram: if True, load the entire stack into RAM (cache='ram');
+                otherwise mmap it lazily (cache='disk').
+        """
+        depth_files = [self._depth_path_for(im) for im in self.im_files]
+        existing = [d for d in depth_files if Path(d).exists()]
+        if not existing:
+            return
+
+        # Read .npy headers via mmap (fast, no data copy) to detect shape uniformity.
+        shapes = {tuple(np.load(d, mmap_mode="r").shape) for d in existing}
+        if len(shapes) != 1:
+            LOGGER.info(f"{self.prefix}depth shapes vary {shapes}; skipping mmap cache (per-file load).")
+            return
+        shape = shapes.pop()
+
+        # Cache path: concat (not with_suffix, which drops trailing components like '.v2').
+        depth_dir = Path(existing[0]).parent
+        cache_path = depth_dir.parent / f"{depth_dir.name}.cache.npy"
+        manifest_path = depth_dir.parent / f"{depth_dir.name}.cache.json"
+        h = self._depth_hash(depth_files)
+
+        rebuild = True
+        if cache_path.exists() and manifest_path.exists():
+            try:
+                m = json.loads(manifest_path.read_text())
+                if m.get("hash") == h and m.get("count") == len(depth_files) and tuple(m.get("shape", ())) == shape:
+                    rebuild = False
+            except Exception:
+                rebuild = True
+
+        if rebuild:
+            n = len(depth_files)
+            nbytes = n * int(np.prod(shape)) * 4
+            # Only rank 0 builds in DDP; other ranks wait for cache_path to appear.
+            if LOCAL_RANK not in {-1, 0}:
+                LOGGER.info(f"{self.prefix}LOCAL_RANK={LOCAL_RANK} waiting for depth cache: {cache_path}")
+                deadline = time.time() + 600  # 10 min cap
+                while time.time() < deadline and not (cache_path.exists() and manifest_path.exists()):
+                    time.sleep(2)
+                if not cache_path.exists():
+                    LOGGER.warning(f"{self.prefix}timed out waiting for depth cache; falling back.")
+                    return
+            else:
+                LOGGER.info(
+                    f"{self.prefix}Building depth mmap cache: {n} × {shape} float32 "
+                    f"→ {cache_path} ({nbytes / 1e9:.2f} GB)"
+                )
+                # Per-PID tmp avoids cross-process collisions on shared FS.
+                tmp = cache_path.parent / f"{cache_path.name}.tmp.{os.getpid()}"
+                tmp.unlink(missing_ok=True)
+                try:
+                    stack = np.lib.format.open_memmap(str(tmp), mode="w+", dtype=np.float32, shape=(n, *shape))
+                    try:
+                        for i, d in enumerate(depth_files):
+                            if Path(d).exists():
+                                stack[i] = np.load(d).astype(np.float32, copy=False)
+                            # Missing files: leave as zeros (open_memmap initializes to 0).
+                        stack.flush()
+                    finally:
+                        del stack  # release the memmap before rename
+                    tmp.replace(cache_path)
+                    manifest_path.write_text(json.dumps({"hash": h, "count": n, "shape": list(shape)}))
+                except Exception:
+                    tmp.unlink(missing_ok=True)  # clean up partial write (disk full, kill, etc.)
+                    raise
+
+        stack = np.load(str(cache_path), mmap_mode=None if load_to_ram else "r")
+        if stack.shape[0] != len(self.im_files):
+            LOGGER.warning(
+                f"{self.prefix}depth cache row count {stack.shape[0]} != "
+                f"{len(self.im_files)}; disabling cache."
+            )
+            return
+        self._depth_stack = stack
+        mode = "RAM" if load_to_ram else "mmap (paged on demand)"
+        LOGGER.info(
+            f"{self.prefix}depth cache ready: {cache_path.name} "
+            f"({stack.nbytes / 1e9:.2f} GB, {mode})"
+        )
 
     def get_image_and_label(self, index):
         """Load image, label, and depth map for the given index."""
         label = super().get_image_and_label(index)
-        # Derive depth path from image path: images/split/name.jpg → depth/split/name.npy
-        im_file = self.labels[index]["im_file"]
-        depth_file = im_file.replace("/images/", "/depth/")
-        depth_file = str(Path(depth_file).with_suffix(".npy"))
-        if Path(depth_file).exists():
-            depth = np.load(depth_file).astype(np.float32)
-            # Resize to match the loaded image size (before LetterBox)
-            h, w = label["resized_shape"]
-            if depth.shape[:2] != (h, w):
-                depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_LINEAR)
-            label["depth"] = depth
+        h, w = label["resized_shape"]
+        if self._depth_stack is not None:
+            # ndarray slice (cache='ram') or memmap slice (cache='disk').
+            # np.asarray copies the slice into a contiguous owned array so downstream
+            # augmentations don't mutate the cache and don't pin mmap pages.
+            depth = np.asarray(self._depth_stack[index], dtype=np.float32)
         else:
-            # Fallback: zero depth map
-            h, w = label["resized_shape"]
-            label["depth"] = np.zeros((h, w), dtype=np.float32)
+            depth_file = self._depth_path_for(self.labels[index]["im_file"])
+            if Path(depth_file).exists():
+                depth = np.load(depth_file).astype(np.float32)
+            else:
+                depth = np.zeros((h, w), dtype=np.float32)
+        if depth.shape[:2] != (h, w):
+            depth = cv2.resize(depth, (w, h), interpolation=cv2.INTER_LINEAR)
+        label["depth"] = depth
         return label
 
     def build_transforms(self, hyp=None):
