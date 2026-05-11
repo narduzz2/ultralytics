@@ -11,6 +11,7 @@ from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
 from .utils import matching
 from .utils.kalman_filter import KalmanFilterXYAH
+from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc
 
 
 class STrack(BaseTrack):
@@ -37,7 +38,6 @@ class STrack(BaseTrack):
     Methods:
         predict: Predict the next state of the object using Kalman filter.
         multi_predict: Predict the next states for multiple tracks.
-        multi_gmc: Update multiple track states using a homography matrix.
         activate: Activate a new tracklet.
         re_activate: Reactivate a previously lost tracklet.
         update: Update the state of a matched track.
@@ -52,12 +52,12 @@ class STrack(BaseTrack):
 
     shared_kalman = KalmanFilterXYAH()
 
-    def __init__(self, xywh: list[float], score: float, cls: Any):
+    def __init__(self, xywh: np.ndarray, score: float, cls: Any):
         """Initialize a new STrack instance.
 
         Args:
-            xywh (list[float]): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format, where (x, y)
-                is the center, (w, h) are width and height, and `idx` is the detection index.
+            xywh (np.ndarray): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format, where (x, y) is
+                the center, (w, h) are width and height, and `idx` is the detection index.
             score (float): Confidence score of the detection.
             cls (Any): Class label for the detected object.
         """
@@ -96,25 +96,6 @@ class STrack(BaseTrack):
         for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
             stracks[i].mean = mean
             stracks[i].covariance = cov
-
-    @staticmethod
-    def multi_gmc(stracks: list[STrack], H: np.ndarray = np.eye(2, 3)):
-        """Update multiple track positions and covariances using a homography matrix."""
-        if stracks:
-            multi_mean = np.asarray([st.mean.copy() for st in stracks])
-            multi_covariance = np.asarray([st.covariance for st in stracks])
-
-            R = H[:2, :2]
-            R8x8 = np.kron(np.eye(4, dtype=float), R)
-            t = H[:2, 2]
-
-            for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
-                mean = R8x8.dot(mean)
-                mean[:2] += t
-                cov = R8x8.dot(cov).dot(R8x8.transpose())
-
-                stracks[i].mean = mean
-                stracks[i].covariance = cov
 
     def activate(self, kalman_filter: KalmanFilterXYAH, frame_id: int):
         """Activate a new tracklet using the provided Kalman filter and initialize its state and covariance."""
@@ -311,17 +292,18 @@ class BYTETracker:
             else:
                 tracked_stracks.append(track)
         # Step 2: First association, with high score detection boxes
-        strack_pool = self.joint_stracks(tracked_stracks, self.lost_stracks)
+        strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
         # Predict the current location with KF
         self.multi_predict(strack_pool)
         if hasattr(self, "gmc") and img is not None:
             # use try-except here to bypass errors from gmc module
             try:
                 warp = self.gmc.apply(img, results.xyxy)
-            except Exception:
+            except Exception as e:
+                LOGGER.warning(f"GMC failed, falling back to identity: {e}")
                 warp = np.eye(2, 3)
-            STrack.multi_gmc(strack_pool, warp)
-            STrack.multi_gmc(unconfirmed, warp)
+            multi_gmc(strack_pool, warp)
+            multi_gmc(unconfirmed, warp)
 
         dists = self.get_dists(strack_pool, detections)
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
@@ -381,17 +363,7 @@ class BYTETracker:
                 track.mark_removed()
                 removed_stracks.append(track)
 
-        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, activated_stracks)
-        self.tracked_stracks = self.joint_stracks(self.tracked_stracks, refind_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.tracked_stracks)
-        self.lost_stracks.extend(lost_stracks)
-        self.lost_stracks = self.sub_stracks(self.lost_stracks, self.removed_stracks)
-        self.tracked_stracks, self.lost_stracks = self.remove_duplicate_stracks(self.tracked_stracks, self.lost_stracks)
-        self.removed_stracks.extend(removed_stracks)
-        if len(self.removed_stracks) > 1000:
-            self.removed_stracks = self.removed_stracks[-1000:]  # clip removed stracks to 1000 maximum
-
+        merge_track_pools(self, activated_stracks, refind_stracks, lost_stracks, removed_stracks)
         return np.asarray([x.result for x in self.tracked_stracks if x.is_activated], dtype=np.float32)
 
     def get_kalmanfilter(self) -> KalmanFilterXYAH:
@@ -430,41 +402,3 @@ class BYTETracker:
         self.frame_id = 0
         self.kalman_filter = self.get_kalmanfilter()
         self.reset_id()
-
-    @staticmethod
-    def joint_stracks(tlista: list[STrack], tlistb: list[STrack]) -> list[STrack]:
-        """Combine two lists of STrack objects into a single list, ensuring no duplicates based on track IDs."""
-        exists = {}
-        res = []
-        for t in tlista:
-            exists[t.track_id] = 1
-            res.append(t)
-        for t in tlistb:
-            tid = t.track_id
-            if not exists.get(tid, 0):
-                exists[tid] = 1
-                res.append(t)
-        return res
-
-    @staticmethod
-    def sub_stracks(tlista: list[STrack], tlistb: list[STrack]) -> list[STrack]:
-        """Filter out the stracks present in the second list from the first list."""
-        track_ids_b = {t.track_id for t in tlistb}
-        return [t for t in tlista if t.track_id not in track_ids_b]
-
-    @staticmethod
-    def remove_duplicate_stracks(stracksa: list[STrack], stracksb: list[STrack]) -> tuple[list[STrack], list[STrack]]:
-        """Remove duplicate stracks from two lists based on Intersection over Union (IoU) distance."""
-        pdist = matching.iou_distance(stracksa, stracksb)
-        pairs = np.where(pdist < 0.15)
-        dupa, dupb = [], []
-        for p, q in zip(*pairs):
-            timep = stracksa[p].frame_id - stracksa[p].start_frame
-            timeq = stracksb[q].frame_id - stracksb[q].start_frame
-            if timep > timeq:
-                dupb.append(q)
-            else:
-                dupa.append(p)
-        resa = [t for i, t in enumerate(stracksa) if i not in dupa]
-        resb = [t for i, t in enumerate(stracksb) if i not in dupb]
-        return resa, resb
