@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from pathlib import Path
 
 from ultralytics.utils import LOGGER, YAML
@@ -48,34 +46,31 @@ def onnx2deepx(
     config_path = export_path / "config.json"
 
     input_name = onnx.load(str(onnx_file)).graph.input[0].name
-    im_files = dataset.dataset.im_files
-    with tempfile.TemporaryDirectory(prefix="deepx_calib_") as calib_dir:
-        for i, src in enumerate(im_files):
-            os.symlink(src, Path(calib_dir) / f"{i:08d}_{Path(src).name}")
+    calib_dir = dataset.dataset.img_path
 
-        config = {
-            "inputs": {input_name: [1, 3, imgsz[0], imgsz[1]]},
-            "calibration_num": 100,  # number of steps used during calibration
-            "calibration_method": "ema",  # calibration method used during quantization
-            "default_loader": {
-                "dataset_path": calib_dir,
-                "file_extensions": ["jpeg", "jpg", "png"],
-                "preprocessings": [
-                    {"resize": {"mode": "pad", "size": imgsz[0], "pad_location": "edge", "pad_value": [114, 114, 114]}},
-                    {"div": {"x": 255.0}},
-                    {"convertColor": {"form": "BGR2RGB"}},
-                    {"transpose": {"axis": [2, 0, 1]}},
-                    {"expandDim": {"axis": 0}},
-                ],
-            },
-        }
+    config = {
+        "inputs": {input_name: [1, 3, imgsz[0], imgsz[1]]},
+        "calibration_num": 100,  # number of steps used during calibration
+        "calibration_method": "ema",  # calibration method used during quantization
+        "default_loader": {
+            "dataset_path": calib_dir,
+            "file_extensions": ["jpeg", "jpg", "png"],
+            "preprocessings": [
+                {"resize": {"mode": "pad", "size": imgsz[0], "pad_location": "edge", "pad_value": [114, 114, 114]}},
+                {"div": {"x": 255.0}},
+                {"convertColor": {"form": "BGR2RGB"}},
+                {"transpose": {"axis": [2, 0, 1]}},
+                {"expandDim": {"axis": 0}},
+            ],
+        },
+    }
 
-        with open(config_path, "w") as file:
-            json.dump(config, file)
+    with open(config_path, "w") as file:
+        json.dump(config, file)
 
-        dx_com.compile(
-            model=str(onnx_file), output_dir=str(export_path), config=str(config_path), opt_level=int(optimize)
-        )
+    dx_com.compile(
+        model=str(onnx_file), output_dir=str(export_path), config=str(config_path), opt_level=int(optimize)
+    )
 
     if metadata is not None:
         YAML.save(export_path / "metadata.yaml", metadata)
