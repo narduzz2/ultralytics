@@ -324,7 +324,7 @@ class Exporter:
                 LOGGER.warning("DeepX export requires int8=True, setting int8=True.")
                 self.args.int8 = True
             if not self.args.data:
-                self.args.data = TASK2CALIBRATIONDATA.get(model.task)
+                self.args.data = TASK2DATA.get(model.task)
 
         if fmt == "axelera":
             if model.task == "segment" and any(isinstance(m, Segment26) for m in model.modules()):
