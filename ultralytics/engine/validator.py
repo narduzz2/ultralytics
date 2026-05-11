@@ -22,6 +22,7 @@ Usage - formats:
                           yolo26n_imx_model          # Sony IMX
                           yolo26n_rknn_model         # Rockchip RKNN
                           yolo26n_executorch_model   # ExecuTorch
+                          yolo26n_deepx_model        # DeepX
                           yolo26n_axelera_model      # Axelera AI
 """
 

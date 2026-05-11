@@ -22,6 +22,7 @@ IMX                     | `imx`                     | yolo26n_imx_model/
 RKNN                    | `rknn`                    | yolo26n_rknn_model/
 ExecuTorch              | `executorch`              | yolo26n_executorch_model/
 Axelera AI              | `axelera`                 | yolo26n_axelera_model/
+DeepX                   | `deepx`                   | yolo26n_deepx_model/
 
 Requirements:
     $ pip install "ultralytics[export]"
@@ -52,6 +53,7 @@ Inference:
                          yolo26n_rknn_model         # RKNN
                          yolo26n_executorch_model   # ExecuTorch
                          yolo26n_axelera_model      # Axelera AI
+                         yolo26n_deepx_model        # DeepX
 
 TensorFlow.js:
     $ cd .. && git clone https://github.com/zldrobit/tfjs-yolov5-example.git && cd tfjs-yolov5-example
@@ -159,6 +161,7 @@ def export_formats():
         ["RKNN", "rknn", "_rknn_model", False, False, ["batch", "name"]],
         ["ExecuTorch", "executorch", "_executorch_model", True, False, ["batch"]],
         ["Axelera AI", "axelera", "_axelera_model", False, False, ["batch", "int8", "fraction", "data"]],
+        ["DeepX", "deepx", "_deepx_model", False, False, ["batch", "int8", "fraction", "data", "optimize"]],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments"], zip(*x)))
 
@@ -316,6 +319,13 @@ class Exporter:
         # Argument compatibility checks
         fmt_keys = dict(zip(fmts_dict["Argument"], fmts_dict["Arguments"]))[fmt]
         validate_args(fmt, self.args, fmt_keys)
+        if fmt == "deepx":
+            if not self.args.int8:
+                LOGGER.warning("DeepX export requires int8=True, setting int8=True.")
+                self.args.int8 = True
+            if not self.args.data:
+                self.args.data = TASK2CALIBRATIONDATA.get(model.task)
+
         if fmt == "axelera":
             if model.task == "segment" and any(isinstance(m, Segment26) for m in model.modules()):
                 raise ValueError("Axelera export does not currently support YOLO26 segmentation models.")
@@ -1059,6 +1069,23 @@ class Exporter:
             max_det=self.args.max_det,
             metadata=self.metadata,
             dataset=partial(self.get_int8_calibration_dataloader, prefix),
+            prefix=prefix,
+        )
+
+    @try_export
+    def export_deepx(self, prefix=colorstr("DeepX:")):
+        """Export YOLO model to DeepX format."""
+        assert LINUX and not ARM64, "DeepX export only supported on non-aarch64 Linux"
+        assert self.imgsz[0] == self.imgsz[1], f"DeepX export requires square imgsz, got {tuple(self.imgsz)}"
+        from ultralytics.utils.export.deepx import onnx2deepx
+
+        f = self.export_onnx()
+        return onnx2deepx(
+            onnx_file=f,
+            imgsz=self.imgsz,
+            dataset=self.get_int8_calibration_dataloader(prefix),
+            metadata=self.metadata,
+            optimize=self.args.optimize,
             prefix=prefix,
         )
 
