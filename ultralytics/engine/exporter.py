@@ -465,6 +465,7 @@ class Exporter:
         for m in model.modules():
             if isinstance(m, (Classify, SemanticSegment)):
                 m.export = True
+                m.format = self.args.format
             if isinstance(m, (Detect, RTDETRDecoder)):  # includes all Detect subclasses like Segment, Pose, OBB
                 m.dynamic = self.args.dynamic
                 m.export = True

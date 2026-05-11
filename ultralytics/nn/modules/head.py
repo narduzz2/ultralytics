@@ -1817,9 +1817,11 @@ class SemanticSegment(nn.Module):
         nl (int): Number of input feature levels.
         stride (torch.Tensor): Feature map strides.
         export (bool): Export mode flag.
+        format (str): Export format.
     """
 
     export = False  # export mode
+    format = None  # export format
 
     def __init__(self, nc=19, ch=()):
         """Initialize the semantic segmentation head.
@@ -1855,6 +1857,6 @@ class SemanticSegment(nn.Module):
             if self.aux_head is not None:
                 return logits, self.aux_head(x[1])  # main + aux (P4)
             return logits
-        if self.export:
+        if self.export and self.format != "coreml":
             return F.interpolate(logits, scale_factor=8, mode="bilinear", align_corners=False)
         return logits
