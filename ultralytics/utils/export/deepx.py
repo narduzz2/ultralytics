@@ -54,7 +54,7 @@ def onnx2deepx(
         "calibration_method": "ema",  # calibration method used during quantization
         "default_loader": {
             "dataset_path": calib_dir,
-            "file_extensions": ["jpeg", "jpg", "png"],
+            "file_extensions": [val for x in ["jpeg", "jpg", "png"] for val in (x.lower(), x.upper())],
             "preprocessings": [
                 {"resize": {"mode": "pad", "size": imgsz[0], "pad_location": "edge", "pad_value": [114, 114, 114]}},
                 {"div": {"x": 255.0}},
