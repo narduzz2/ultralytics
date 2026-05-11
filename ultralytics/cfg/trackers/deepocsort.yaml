@@ -17,7 +17,7 @@ inertia: 0.2 # (float) Weight of velocity consistency cost in association
 use_byte: False # (bool) Enable ByteTrack-style low-confidence second association pass
 
 # Deep OC-SORT specifics
-gmc_method: none # (str) Global motion compensation: sparseOptFlow|orb|sift|ecc|none; use 'none' with XYAH state
+gmc_method: none # (str) Global motion compensation: sparseOptFlow|orb|sift|ecc|none; enable for moving-camera scenes
 with_reid: False # (bool) Enable ReID model use; needs extra model and compute
 model: auto # (str) ReID model name/path; "auto" uses detector features when available. Otherwise an exported file (.torchscript / .onnx / .engine / …) or a `.pt` checkpoint.
 proximity_thresh: 0.5 # (float) Min IoU to consider tracks proximate for ReID; higher is stricter

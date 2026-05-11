@@ -5,7 +5,7 @@
 # Paper: "Focusing on Tracks for Online Multi-Object Tracking" (CVPR 2025)
 # Docs: https://docs.ultralytics.com/modes/track/
 
-tracker_type: tracktrack # (str) Tracker backend: botsort|bytetrack|tracktrack
+tracker_type: tracktrack # (str) Tracker backend: tracktrack
 track_high_thresh: 0.6 # (float) High-confidence detection threshold
 track_low_thresh: 0.25 # (float) Low-confidence detection threshold for second stage
 new_track_thresh: 0.6 # (float) Score threshold for starting a new track

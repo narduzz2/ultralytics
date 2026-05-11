@@ -4,7 +4,7 @@
 # Paper: https://arxiv.org/abs/2508.14370
 # Occlusion-aware ByteTrack-style tracker with lightweight Kalman rollback and init IoU suppression.
 
-tracker_type: fasttrack # (str) Tracker backend: bytetrack|botsort|fasttrack
+tracker_type: fasttrack # (str) Tracker backend: fasttrack
 track_high_thresh: 0.25 # (float) First-stage match threshold
 track_low_thresh: 0.1 # (float) Second-stage threshold for low-score matches
 new_track_thresh: 0.25 # (float) Start a new track if no match ≥ this
