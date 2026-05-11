@@ -627,14 +627,13 @@ class Mosaic(BaseMixTransform):
         layout = params["layout"]
         mosaic_labels = []
         for item in layout:
-            labels_patch = deepcopy(item["labels_patch"])
             if self.n == 4:
                 padw = item["padw"]
                 padh = item["padh"]
             else:  # n == 9
                 padw = item["padw"] + self.border[0]
                 padh = item["padh"] + self.border[1]
-            labels_patch = self._update_labels(labels_patch, padw, padh, item.get("img_shape"))
+            labels_patch = self._update_labels(item["labels_patch"], padw, padh, item.get("img_shape"))
             mosaic_labels.append(labels_patch)
         final_labels = self._cat_labels(mosaic_labels)
         labels.update(final_labels)
