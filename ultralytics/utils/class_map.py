@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import torch
 
@@ -69,6 +69,7 @@ def remap_class_row_state_dict(
     dst_names,
     aliases: Mapping[str, str | list[str]] | None = None,
     key_hints: tuple[str, ...] = DEFAULT_CLASS_KEY_HINTS,
+    key_filter: Callable[[str], bool] | None = None,
 ) -> tuple[dict[str, torch.Tensor], list[tuple[str, tuple[int, ...], tuple[int, ...]]], list[tuple[int, str]]]:
     """Remap class-row tensors from src_state to dst_state using class-name matching."""
     src_name_list = names_to_list(src_names)
@@ -84,9 +85,14 @@ def remap_class_row_state_dict(
         if key not in dst_state:
             continue
         dst_tensor = dst_state[key]
-        if src_tensor.shape == dst_tensor.shape:
+        if key_filter is not None:
+            if not key_filter(key):
+                continue
+        elif not any(h in key for h in key_hints):
             continue
-        if not any(h in key for h in key_hints):
+        if src_tensor.ndim == 0 or dst_tensor.ndim == 0:
+            continue
+        if src_tensor.shape[0] != len(src_name_list) or dst_tensor.shape[0] != len(dst_name_list):
             continue
         if src_tensor.ndim != dst_tensor.ndim or src_tensor.shape[1:] != dst_tensor.shape[1:]:
             continue

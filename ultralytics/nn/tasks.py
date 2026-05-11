@@ -99,6 +99,8 @@ from ultralytics.utils.torch_utils import (
     time_sync,
 )
 
+YOLO_CLASS_HEAD_KEY_PATTERN = re.compile(r"\.(?:one2one_)?cv3\.\d+\.2\.(?:weight|bias)$")
+
 
 class BaseModel(torch.nn.Module):
     """Base class for all YOLO models in the Ultralytics family.
@@ -296,21 +298,56 @@ class BaseModel(torch.nn.Module):
             m.strides = fn(m.strides)
         return self
 
-    def load(self, weights, verbose=True):
+    def load(self, weights, verbose=True, src_names=None, dst_names=None, remap_class_rows=False):
         """Load weights into the model.
 
         Args:
             weights (dict | torch.nn.Module): The pre-trained weights to be loaded.
             verbose (bool, optional): Whether to log the transfer progress.
+            src_names (dict | list, optional): Source checkpoint class names.
+            dst_names (dict | list, optional): Target dataset class names.
+            remap_class_rows (bool, optional): Whether to remap YOLO class head rows by class name.
         """
         model = weights["model"] if isinstance(weights, dict) else weights  # torchvision models are not dicts
         csd = model.float().state_dict()  # checkpoint state_dict as FP32
-        updated_csd = intersect_dicts(csd, self.state_dict())  # intersect
+        state_dict = self.state_dict()
+
+        if src_names is None:
+            src_names = getattr(model, "names", None)
+        if dst_names is None:
+            dst_names = getattr(self, "names", None)
+
+        src_name_list = names_to_list(src_names)
+        dst_name_list = names_to_list(dst_names)
+        names_match = bool(src_name_list) and src_name_list == dst_name_list
+        head = self.model[-1]
+        if (
+            remap_class_rows
+            and isinstance(head, Detect)
+            and not isinstance(head, (WorldDetect, YOLOEDetect))
+            and src_names is not None
+            and dst_names is not None
+            and not is_default_numeric_names(src_names)
+            and not is_default_numeric_names(dst_names)
+            and not names_match
+        ):
+            csd, remapped, missing = remap_class_row_state_dict(
+                csd,
+                state_dict,
+                src_names=src_names,
+                dst_names=dst_names,
+                key_filter=lambda key: bool(YOLO_CLASS_HEAD_KEY_PATTERN.search(key)),
+            )
+            if verbose and remapped:
+                LOGGER.info(f"Remapped {len(remapped)} YOLO class tensors using source->target class-name map")
+            if verbose and missing:
+                LOGGER.info(f"{len(missing)} target classes were not mapped and kept target initialization")
+
+        updated_csd = intersect_dicts(csd, state_dict)  # intersect
         self.load_state_dict(updated_csd, strict=False)  # load
         len_updated_csd = len(updated_csd)
         first_conv = "model.0.conv.weight"  # hard-coded to yolo models for now
         # mostly used to boost multi-channel training
-        state_dict = self.state_dict()
         if first_conv not in updated_csd and first_conv in state_dict:
             c1, c2, h, w = state_dict[first_conv].shape
             cc1, cc2, ch, cw = csd[first_conv].shape

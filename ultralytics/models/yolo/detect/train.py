@@ -180,7 +180,13 @@ class DetectionTrainer(BaseTrainer):
         """
         model = DetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1)
         if weights:
-            model.load(weights)
+            model.load(
+                weights,
+                verbose=verbose and RANK in {-1, 0},
+                src_names=getattr(weights, "names", None),
+                dst_names=self.data.get("names"),
+                remap_class_rows=True,
+            )
         return model
 
     def get_validator(self):
