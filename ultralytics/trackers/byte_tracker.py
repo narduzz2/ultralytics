@@ -38,7 +38,6 @@ class STrack(BaseTrack):
     Methods:
         predict: Predict the next state of the object using Kalman filter.
         multi_predict: Predict the next states for multiple tracks.
-        multi_gmc: Update multiple track states using a homography matrix.
         activate: Activate a new tracklet.
         re_activate: Reactivate a previously lost tracklet.
         update: Update the state of a matched track.
@@ -97,8 +96,6 @@ class STrack(BaseTrack):
         for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
             stracks[i].mean = mean
             stracks[i].covariance = cov
-
-    multi_gmc = staticmethod(multi_gmc)
 
     def activate(self, kalman_filter: KalmanFilterXYAH, frame_id: int):
         """Activate a new tracklet using the provided Kalman filter and initialize its state and covariance."""
@@ -305,8 +302,8 @@ class BYTETracker:
             except Exception as e:
                 LOGGER.warning(f"GMC failed, falling back to identity: {e}")
                 warp = np.eye(2, 3)
-            STrack.multi_gmc(strack_pool, warp)
-            STrack.multi_gmc(unconfirmed, warp)
+            multi_gmc(strack_pool, warp)
+            multi_gmc(unconfirmed, warp)
 
         dists = self.get_dists(strack_pool, detections)
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)

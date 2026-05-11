@@ -506,14 +506,13 @@ class TRACKTRACK:
 
         from .utils.reid import build_encoder
 
-        self.with_reid = get("with_reid", False)
-        self.encoder = build_encoder(self.with_reid, get("model", "auto"))
+        self.encoder = build_encoder(get("with_reid", False), get("model", "auto"))
 
     def _cost_matrix(self, tracks: list[TTSTrack], dets: list[TTSTrack]) -> np.ndarray:
         """Return the multi-cue cost matrix (HMIoU + ReID + confidence + angle), gated by IoU support."""
         iou_sim, hmiou_dist = _hmiou_distance(tracks, dets)
         cost = self.iou_weight * hmiou_dist
-        if self.with_reid and self.encoder is not None:
+        if self.encoder is not None:
             cost += self.reid_weight * _cosine_distance(tracks, dets)
         else:
             cost += self.reid_weight * hmiou_dist
@@ -557,7 +556,7 @@ class TRACKTRACK:
             return track
 
         high_boxes, high_scores, high_cls = boxes[high_mask], scores[high_mask], results.cls[high_mask]
-        if self.with_reid and self.encoder is not None and img is not None and len(high_boxes) > 0:
+        if self.encoder is not None and img is not None and len(high_boxes) > 0:
             features = self.encoder(img, high_boxes)
             dets_high = [_new_track(b, s, c, f) for b, s, c, f in zip(high_boxes, high_scores, high_cls, features)]
         else:

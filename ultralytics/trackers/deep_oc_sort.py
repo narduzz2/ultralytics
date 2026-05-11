@@ -191,8 +191,7 @@ class DeepOCSORT(OCSORT):
         self.appearance_thresh = getattr(args, "appearance_thresh", 0.75)
         self.alpha_fixed_emb = getattr(args, "alpha_fixed_emb", 0.95)
 
-        self.with_reid = getattr(args, "with_reid", False)
-        self.encoder = build_encoder(self.with_reid, getattr(args, "model", "auto"))
+        self.encoder = build_encoder(getattr(args, "with_reid", False), getattr(args, "model", "auto"))
 
     def init_track(self, results, img: np.ndarray | None = None) -> list[DeepOCSortTrack]:
         """Build :class:`DeepOCSortTrack` instances, attaching ReID features when enabled.
@@ -214,7 +213,7 @@ class DeepOCSORT(OCSORT):
         bboxes = results.xywhr if hasattr(results, "xywhr") else results.xywh
         bboxes = np.concatenate([bboxes, np.arange(len(bboxes)).reshape(-1, 1)], axis=-1)
 
-        if self.with_reid and self.encoder is not None and img is not None:
+        if self.encoder is not None and img is not None:
             features = self.encoder(img, bboxes)
             return [
                 DeepOCSortTrack(
@@ -242,7 +241,7 @@ class DeepOCSORT(OCSORT):
         to the no-encoding path instead of feeding a BGR frame into the auto encoder. For
         external ReID models, `init_track` always wants the BGR frame.
         """
-        use_native = self.with_reid and self.encoder is not None and getattr(self.args, "model", "auto") == "auto"
+        use_native = self.encoder is not None and getattr(self.args, "model", "auto") == "auto"
         if use_native:
             return feats[mask] if (feats is not None and len(feats)) else None
         return img
@@ -260,7 +259,7 @@ class DeepOCSORT(OCSORT):
 
     def _fuse_appearance(self, dists, tracks, detections, iou_dists=None):
         """Min-fuse appearance distance into the motion cost (BoT-SORT-style)."""
-        if not (self.with_reid and self.encoder is not None) or not tracks or not detections:
+        if not (self.encoder is not None) or not tracks or not detections:
             return dists
         emb_dists = matching.embedding_distance(tracks, detections) / 2.0
         emb_dists[emb_dists > (1 - self.appearance_thresh)] = 1.0
