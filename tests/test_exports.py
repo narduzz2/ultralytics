@@ -393,5 +393,5 @@ def test_export_deepx():
     # For faster testing, use a smaller calibration dataset
     file = YOLO(MODEL).export(format="deepx", imgsz=32, data="coco8.yaml")
     assert Path(file).exists(), f"DeepX export failed, directory not found: {file}"
-    # Note: Inference testing skipped as it requires Axelera hardware
+    # Note: Inference testing skipped as it requires DeepX hardware
     shutil.rmtree(file, ignore_errors=True)  # cleanup
