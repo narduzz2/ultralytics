@@ -58,7 +58,7 @@ def onnx2deepx(
             "calibration_num": len(im_files),
             "calibration_method": "ema",
             "train_batchsize": 32,
-            "num_samples": 1024,
+            "num_samples": min(1024, len(im_files)),
             "default_loader": {
                 "dataset_path": calib_dir,
                 "file_extensions": ["jpeg", "jpg", "png", "JPEG"],
