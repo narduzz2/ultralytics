@@ -57,8 +57,8 @@ class STrack(BaseTrack):
         """Initialize a new STrack instance.
 
         Args:
-            xywh (np.ndarray): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format, where (x, y)
-                is the center, (w, h) are width and height, and `idx` is the detection index.
+            xywh (np.ndarray): Bounding box in `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)` format, where (x, y) is
+                the center, (w, h) are width and height, and `idx` is the detection index.
             score (float): Confidence score of the detection.
             cls (Any): Class label for the detected object.
         """
