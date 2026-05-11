@@ -127,7 +127,7 @@ In addition to the [shared tracker arguments](#tracker-arguments), BoT-SORT expo
 - **Stage 1 (high-confidence):** match high-score detections (`scores ≥ track_high_thresh`) against active tracks using IoU on Kalman predictions.
 - **Stage 2 (low-confidence rescue):** the leftover unmatched tracks are re-tried against low-score detections (`track_low_thresh < scores < track_high_thresh`). Detections that the detector almost rejected can keep an existing track alive through brief partial occlusion.
 
-There is no appearance model and no camera-motion compensation just linear Kalman + IoU + the second pass.
+There is no appearance model and no camera-motion compensation—just linear Kalman + IoU + the second pass.
 
 #### When to use ByteTrack
 
@@ -137,7 +137,7 @@ There is no appearance model and no camera-motion compensation just linear Kalma
 
 #### ByteTrack-specific arguments
 
-ByteTrack uses only the [shared tracker arguments](#tracker-arguments) there are no ByteTrack-specific extras. The `track_high_thresh` / `track_low_thresh` / `match_thresh` triple controls almost all of its behavior.
+ByteTrack uses only the [shared tracker arguments](#tracker-arguments). There are no ByteTrack-specific extras. The `track_high_thresh` / `track_low_thresh` / `match_thresh` triple controls almost all of its behavior.
 
 #### Example: running ByteTrack
 
@@ -229,7 +229,7 @@ In addition to the shared arguments (`track_high_thresh`, `track_low_thresh`, `n
 
 - Crowded or visually diverse scenes where OC-SORT alone produces ID swaps between spatially-close objects.
 - Moving-camera footage (drones, dashcams, body cams) where motion compensation makes the difference between drift and stable tracks.
-- You can afford the extra inference cost of a ReID model. ReID is opt-in (`with_reid: True`) Deep OC-SORT still works with motion + CMC only when ReID is off.
+- You can afford the extra inference cost of a ReID model. ReID is opt-in (`with_reid: True`). Deep OC-SORT still works with motion + CMC only when ReID is off.
 
 #### Deep OC-SORT-specific arguments
 
@@ -291,7 +291,7 @@ In addition to all [OC-SORT arguments](#oc-sort-specific-arguments) and the shar
 
 - Real-time detection-only pipelines where ByteTrack drops IDs around partial occlusions and you don't want the cost of ReID.
 - Crowd / queue / retail / sports scenes with frequent target-on-target overlap.
-- Latency-sensitive deployments FastTracker has no extra network in the loop.
+- Latency-sensitive deployments. FastTracker has no extra network in the loop.
 
 #### FastTracker-specific arguments
 
@@ -301,7 +301,7 @@ In addition to the shared arguments (`track_high_thresh`, `track_low_thresh`, `n
 | --------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `reset_velocity_offset_occ` | `>=0`                      | Number of history frames back to restore the Kalman velocity from on occlusion onset.                                    |
 | `reset_pos_offset_occ`      | `>=0`                      | Number of history frames back to restore the Kalman position from on occlusion onset.                                    |
-| `enlarge_bbox_occ`          | `>=1.0`                    | One-shot scaling applied to the predicted bbox while occluded so the search region widens.                               |
+| `enlarge_bbox_occ`          | `>=1.0`                    | One-shot height scaling applied to the predicted bbox while occluded so the search region widens (width scales proportionally via XYAH aspect ratio).                               |
 | `dampen_motion_occ`         | `0.0-1.0`                  | Multiplicative factor applied to velocity while occluded. Lower values make the track "slow down" through the occlusion. |
 | `active_occ_to_lost_thresh` | `>=1`                      | Maximum consecutive occluded frames before an active track is moved to the lost pool.                                    |
 | `occ_cover_thresh`          | `0.0-1.0`                  | Fraction of a track's area that must be covered by another active track to declare occlusion.                            |
@@ -340,7 +340,7 @@ In addition to the shared arguments (`track_high_thresh`, `track_low_thresh`, `n
 
 ### TrackTrack
 
-[TrackTrack](https://openaccess.thecvf.com/content/CVPR2025/papers/Shim_Focusing_on_Tracks_for_Online_Multi-Object_Tracking_CVPR_2025_paper.pdf) (Shim et al., CVPR 2025) is a track-focused online multi-object tracker. Unlike ByteTrack and BoT-SORT which primarily look at matching from the detection side TrackTrack reasons from each track's perspective and combines multiple cues in a single cost matrix. It introduces two main ideas on top of standard tracking-by-detection:
+[TrackTrack](https://openaccess.thecvf.com/content/CVPR2025/papers/Shim_Focusing_on_Tracks_for_Online_Multi-Object_Tracking_CVPR_2025_paper.pdf) (Shim et al., CVPR 2025) is a track-focused online multi-object tracker. Unlike ByteTrack and BoT-SORT which primarily look at matching from the detection side, TrackTrack reasons from each track's perspective and combines multiple cues in a single cost matrix. It introduces two main ideas on top of standard tracking-by-detection:
 
 - **Track-Perspective-Based Association (TPA):** a multi-cue cost combining HMIoU (IoU modulated by vertical overlap), cosine ReID distance, confidence-projection distance, and corner-angle distance. The assignment is solved iteratively with a threshold that relaxes at each iteration, so high-quality matches are locked in first and harder pairs are revisited with looser gates. Low-confidence detections and detections recovered from a looser secondary NMS pass (`D_del`) are added to the cost with penalty terms so they can still rebind lost tracks without stealing strong matches.
 - **Track-Aware Initialization (TAI):** before spawning a new track, candidate detections are suppressed if they heavily overlap an existing track or a stronger detection. This greatly reduces duplicate IDs in crowded scenes.
@@ -350,7 +350,7 @@ TrackTrack also uses NSA-Kalman updates (measurement-noise scaled by detection c
 #### When to use TrackTrack
 
 - Crowded scenes with frequent occlusion (pedestrians, retail, sports) where duplicate IDs are a problem.
-- Scenarios where you want good performance without necessarily enabling ReID the multi-cue cost already uses HMIoU, confidence projection, and corner-angle cues.
+- Scenarios where you want good performance without necessarily enabling ReID. The multi-cue cost already uses HMIoU, confidence projection, and corner-angle cues.
 - Moving-camera footage where GMC helps, but you also want one-knob control over the speed/accuracy trade-off via `gmc_downscale`, `gmc_max_corners`, and `gmc_skip_frames`.
 
 #### TrackTrack-specific arguments
@@ -402,7 +402,7 @@ In addition to the shared arguments (`track_high_thresh`, `track_low_thresh`, `n
 
 #### Example: TrackTrack with ReID
 
-ReID is optional in TrackTrack when it's disabled, the `reid_weight` falls back to HMIoU. Enabling it gives appearance-based rebinding across longer occlusions, at some additional cost:
+ReID is optional in TrackTrack. When it's disabled, the `reid_weight` falls back to HMIoU. Enabling it gives appearance-based rebinding across longer occlusions, at some additional cost:
 
 !!! example "TrackTrack + ReID"
 
@@ -423,7 +423,7 @@ ReID is optional in TrackTrack when it's disabled, the `reid_weight` falls back 
         )
         ```
 
-For a per-frame loop with track IDs, see [Persisting Tracks Loop](#persisting-tracks-loop) under [Python Examples](#python-examples) that pattern works for any tracker, just swap the `tracker=` argument.
+For a per-frame loop with track IDs, see [Persisting Tracks Loop](#persisting-tracks-loop) under [Python Examples](#python-examples). That pattern works for any tracker, just swap the `tracker=` argument.
 
 #### Tuning tips
 
@@ -872,7 +872,7 @@ To run object tracking on multiple video streams simultaneously, you can use Pyt
 
 ### When should I use TrackTrack instead of BoT-SORT or ByteTrack?
 
-TrackTrack is a good choice when identity preservation is critical especially in crowded scenes with frequent occlusion. It combines multiple cues (HMIoU, ReID, confidence projection, corner-angle distance) from each track's perspective and solves the association with an iterative threshold, which helps high-quality matches lock in first. Track-Aware Initialization (TAI) also suppresses duplicate spawns before a new ID is created, reducing ID fragmentation. ByteTrack remains the fastest option for simple scenes, BoT-SORT is a strong general-purpose baseline with optional ReID, and TrackTrack trades a bit of overhead for better behavior under occlusion and crowding. Enable it with `tracker="tracktrack.yaml"`:
+TrackTrack is a good choice when identity preservation is critical, especially in crowded scenes with frequent occlusion. It combines multiple cues (HMIoU, ReID, confidence projection, corner-angle distance) from each track's perspective and solves the association with an iterative threshold, which helps high-quality matches lock in first. Track-Aware Initialization (TAI) also suppresses duplicate spawns before a new ID is created, reducing ID fragmentation. ByteTrack remains the fastest option for simple scenes, BoT-SORT is a strong general-purpose baseline with optional ReID, and TrackTrack trades a bit of overhead for better behavior under occlusion and crowding. Enable it with `tracker="tracktrack.yaml"`:
 
 !!! example
 

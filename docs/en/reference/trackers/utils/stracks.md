@@ -1,6 +1,6 @@
 ---
-description: TODO ADD DESCRIPTION
-keywords: TODO ADD KEYWORDS
+description: Reference for shared track-pool utilities including merge, joint, subtract, duplicate removal, and global motion compensation helpers.
+keywords: Ultralytics, stracks, track pools, multi-object tracking, GMC, STrack utilities
 ---
 
 # Reference for `ultralytics/trackers/utils/stracks.py`
