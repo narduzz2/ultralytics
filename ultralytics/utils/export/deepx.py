@@ -55,8 +55,8 @@ def onnx2deepx(
 
         config = {
             "inputs": {input_name: [1, 3, imgsz[0], imgsz[1]]},
-            "calibration_num": 100, # number of steps used during calibration
-            "calibration_method": "ema", # calibration method used during quantization
+            "calibration_num": 100,  # number of steps used during calibration
+            "calibration_method": "ema",  # calibration method used during quantization
             "default_loader": {
                 "dataset_path": calib_dir,
                 "file_extensions": ["jpeg", "jpg", "png"],
