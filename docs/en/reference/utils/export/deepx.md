@@ -1,5 +1,5 @@
 ---
-description: Reference for the Ultralytics DeepX export utility. Learn how to convert ONNX models to DeepX format using the dx_com compiler.
+description: Reference for the Ultralytics DeepX export utility. Learn how to convert ONNX models to DeepX format using the DX-Compiler.
 keywords: onnx2deepx, DeepX export, dx_com, ONNX, model conversion, Ultralytics, INT8 quantization
 ---
 

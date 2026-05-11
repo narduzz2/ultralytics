@@ -1,5 +1,5 @@
 ---
-description: Reference for the Ultralytics DeepXBackend. Learn how to run inference with DeepX NPU compiled models using the dx_engine runtime.
+description: Reference for the Ultralytics DeepXBackend. Learn how to run inference with DeepX NPU compiled models using the DX-Runtime.
 keywords: DeepXBackend, DeepX, NPU, inference backend, dx_engine, Ultralytics, YOLO, edge AI
 ---
 
