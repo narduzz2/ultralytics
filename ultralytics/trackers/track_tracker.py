@@ -22,6 +22,8 @@ from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc
 _CORNER_DX_IDX = np.array([0, 0, 2, 2])
 _CORNER_DY_IDX = np.array([1, 3, 1, 3])
 
+_LOOSE_NMS_DEDUP_IOU = 0.97  # IoU threshold to consider duplicate detections as "new"
+
 
 def _nsa_kalman_update(
     kf: KalmanFilterXYWH, mean: np.ndarray, covariance: np.ndarray, measurement: np.ndarray, confidence: float
@@ -194,7 +196,7 @@ def compute_dets_del(predictor) -> list | None:
             out.append(None)
             continue
         max_iou = box_iou(loose_xyxy, tight_xyxy).max(dim=1).values
-        mask = max_iou < 0.97
+        mask = max_iou < _LOOSE_NMS_DEDUP_IOU
         if not mask.any():
             out.append(None)
             continue
@@ -207,6 +209,25 @@ def compute_dets_del(predictor) -> list | None:
 
     predictor._raw_preds = None
     return out
+
+
+def _cosine_distance(tracks: list[TTSTrack], dets: list[TTSTrack]) -> np.ndarray:
+    """Return cosine distance in `[0, 1]` between track smoothed embeddings and detection current embeddings."""
+    n, m = len(tracks), len(dets)
+    if n == 0 or m == 0:
+        return np.ones((n, m), dtype=np.float64)
+    dim = 128
+    for obj in (*tracks, *dets):
+        feat = obj.smooth_feat if obj.smooth_feat is not None else obj.curr_feat
+        if feat is not None:
+            dim = feat.shape[0]
+            break
+    else:
+        LOGGER.warning("TRACKTRACK ReID enabled but all features are None; falling back to zero embeddings.")
+    zeros = np.zeros(dim, dtype=np.float32)
+    track_feats = np.stack([t.smooth_feat if t.smooth_feat is not None else zeros for t in tracks])
+    det_feats = np.stack([d.curr_feat if d.curr_feat is not None else zeros for d in dets])
+    return np.clip(1 - track_feats @ det_feats.T, 0, 1)
 
 
 class TTSTrack(BaseTrack):
@@ -236,7 +257,7 @@ class TTSTrack(BaseTrack):
     _alpha = 0.95
     _delta_t = 3
 
-    def __init__(self, xywh: list[float], score: float, cls: Any, feat: np.ndarray | None = None):
+    def __init__(self, xywh: np.ndarray | list[float], score: float, cls: Any, feat: np.ndarray | None = None):
         """Initialize a TTSTrack from a detection bounding box.
 
         Args:
@@ -506,7 +527,11 @@ class TRACKTRACK:
         if self._gmc_skip > 0 and self._gmc_counter % (self._gmc_skip + 1) != 0:
             warp = self._gmc_warp
         else:
-            warp = self.gmc.apply(img, [det.xyxy for det in detections])
+            try:
+                warp = self.gmc.apply(img, [det.xyxy for det in detections])
+            except Exception as e:
+                LOGGER.warning(f"GMC failed, falling back to identity: {e}")
+                warp = np.eye(2, 3)
             self._gmc_warp = warp
         self._gmc_counter += 1
         for pool in pools:
@@ -637,22 +662,3 @@ class TRACKTRACK:
         self.kalman_filter = KalmanFilterXYWH()
         TTSTrack.reset_id()
         self.gmc.reset_params()
-
-
-def _cosine_distance(tracks: list[TTSTrack], dets: list[TTSTrack]) -> np.ndarray:
-    """Return cosine distance in `[0, 1]` between track smoothed embeddings and detection current embeddings."""
-    n, m = len(tracks), len(dets)
-    if n == 0 or m == 0:
-        return np.ones((n, m), dtype=np.float64)
-    dim = 128
-    for obj in (*tracks, *dets):
-        feat = obj.smooth_feat if obj.smooth_feat is not None else obj.curr_feat
-        if feat is not None:
-            dim = feat.shape[0]
-            break
-    else:
-        LOGGER.warning("TRACKTRACK ReID enabled but all features are None; falling back to zero embeddings.")
-    zeros = np.zeros(dim, dtype=np.float32)
-    track_feats = np.stack([t.smooth_feat if t.smooth_feat is not None else zeros for t in tracks])
-    det_feats = np.stack([d.curr_feat if d.curr_feat is not None else zeros for d in dets])
-    return np.clip(1 - track_feats @ det_feats.T, 0, 1)
