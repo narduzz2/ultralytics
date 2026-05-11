@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import torch
 import numpy as np
 
 from ultralytics.data.augment import LetterBox
