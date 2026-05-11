@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from typing import Any
@@ -36,7 +35,8 @@ import cv2
 import numpy as np
 import torch
 
-from ultralytics.utils import LOGGER, NUM_THREADS, SETTINGS, TQDM, DataExportMixin, SimpleClass
+from ultralytics.utils import LOGGER, NUM_THREADS, RUNS_DIR, SETTINGS, TQDM, DataExportMixin, SimpleClass
+from ultralytics.utils.files import increment_path
 from ultralytics.utils.metrics import box_iou
 from ultralytics.utils.ops import xywh2xyxy, xywhn2xyxy
 from ultralytics.utils.patches import imread
@@ -414,7 +414,7 @@ class ImagePropertyAnalyzer:
         self.workers = workers
         self.batch = batch
         self.conf = conf
-        self.save_dir = Path(save_dir or Path("runs/analysis") / datetime.now().strftime("%Y%m%d_%H%M%S"))
+        self.save_dir = Path(save_dir) if save_dir else increment_path(RUNS_DIR / "analyze", exist_ok=False)
         self._metrics_override = metrics
         self._dataset_override = dataset
 

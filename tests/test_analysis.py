@@ -155,8 +155,8 @@ def test_run_dataset_only_path(tmp_path):
 
 def test_run_from_metrics_path(tmp_path):
     """From_metrics reuses an existing model.val() result and produces full ObjectLab output."""
-    m = YOLO("yolo11n.pt")
-    metrics = m.val(
+    model = YOLO("yolo11n.pt")
+    metrics = model.val(
         data="coco128.yaml",
         batch=8,
         plots=False,
@@ -167,7 +167,9 @@ def test_run_from_metrics_path(tmp_path):
         device="cpu",
     )
     out_dir = tmp_path / "from_metrics"
-    report = ImagePropertyAnalyzer.from_metrics(metrics, dataset=m.validator.dataloader.dataset, save_dir=out_dir).run()
+    report = ImagePropertyAnalyzer.from_metrics(
+        metrics, dataset=model.validator.dataloader.dataset, save_dir=out_dir
+    ).run()
     assert report.has_predictions is True
     sample = next(iter(report.per_image.values()))
     assert sample.get("f1") is not None

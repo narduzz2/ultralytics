@@ -22,15 +22,15 @@ from ultralytics.utils.analysis import ImagePropertyAnalyzer
 report = ImagePropertyAnalyzer(model="yolo11n.pt", data="coco128.yaml").run()
 
 # Path 2: from a previous model.val() result, no re-validation
-m = YOLO("yolo11n.pt")
-metrics = m.val(data="coco128.yaml", analyze_images=True)
-report = ImagePropertyAnalyzer.from_metrics(metrics, dataset=m.validator.dataloader.dataset).run()
+model = YOLO("yolo11n.pt")
+metrics = model.val(data="coco128.yaml", analyze_images=True)
+report = ImagePropertyAnalyzer.from_metrics(metrics, dataset=model.validator.dataloader.dataset).run()
 
 # Path 3: dataset-only audit, no model required
 report = ImagePropertyAnalyzer(data="coco128.yaml").run()
 ```
 
-Each call writes the following to a timestamped `runs/analysis/` directory:
+Each call writes the following to an auto-incremented `runs/analyze/` directory (`runs/analyze`, `runs/analyze-2`, ...), following the same `increment_path` convention used for `runs/detect/train`, `runs/detect/val`, etc.:
 
 | File                      | Purpose                                                                               |
 | ------------------------- | ------------------------------------------------------------------------------------- |
@@ -57,7 +57,7 @@ Rendered on COCO val2017 (5000 images) with `yolo11n.pt` at `conf=0.25`. `summar
 The 4 ObjectLab fields (`overlooked_score`, `badloc_score`, `swap_score`, `label_quality_score`) require the validator to compute them inline during validation. Pass `analyze_images=True` to `model.val()`:
 
 ```python
-metrics = m.val(data="coco128.yaml", analyze_images=True)
+metrics = model.val(data="coco128.yaml", analyze_images=True)
 ```
 
 The model+data path (`ImagePropertyAnalyzer(model=..., data=...)`) sets this flag automatically. The validator stores ~32 bytes/image extra in `metrics.box.image_metrics` (4 float scores per image). Raw IoU matrices and pred/GT arrays are not retained. Without the flag, ObjectLab columns are populated as `NaN`.
@@ -138,15 +138,25 @@ See the [Platform API docs](https://docs.ultralytics.com/platform/api/) for URI 
 
 ## Acting on the results
 
-The report surfaces _which_ image properties drive low per-image F1. Common follow-ups:
+`summary.md` lists the top correlated properties with a strength band (`strong`, `moderate`, `weak`, `negligible`) and a direction (`higher X -> lower F1` or `higher X -> higher F1`). The full per-property breakdown is in `correlations.json`. Focus on the `strong` and `moderate` entries, those are where a training-data change will move the needle.
 
 - **Crowdedness / object count**: if `num_objects`, `max_pairwise_iou`, or `small_object_ratio` correlate with low F1, your model struggles in dense scenes. Consider raising `imgsz`, training with more crowded-scene augmentation (mosaic, copy-paste), or generating synthetic crowded scenes targeting the worst images.
 - **Object scale spread**: if `object_scale_variance` or `num_small` correlate with low F1, multi-scale predictions are weak. Tune anchor-free head capacity or add tiled-inference for small targets.
 - **Pixel-level corruptions**: brightness/contrast/blurriness/`dark_pixel_ratio` correlations point at exposure or motion-blur issues. Augment with the corresponding [Albumentations](../integrations/albumentations.md) transforms, or retrain after curating examples with similar properties.
 - **Label-quality scores** (`overlooked_score`, `badloc_score`, `swap_score`, `label_quality_score`): low scores flag specific annotation issues per image. Review the listed worst images, fix labels, and retrain.
-- **Worst-image triage**: the listed worst images are direct candidates for synthetic-data targets: generate variants with the highlighted properties amplified, label them, and add to the training set.
+- **Worst-image triage**: the listed worst images are direct candidates for synthetic-data targets. Generate variants with the highlighted properties amplified, label them, and add to the training set.
 
 The `anomaly_score` per image is a signed z-score average across all properties, weighted so positive = unusual in an F1-degrading direction. Treat large positive values as "this image is statistically the kind of input your model struggles with."
+
+## Reading the correlation values
+
+If you want to read the raw `pearson_r` / `spearman_r` numbers in `correlations.json` directly instead of leaning on the summary bands:
+
+- **Focus on `spearman_r`** ([Wikipedia](https://en.wikipedia.org/wiki/Spearman%27s_rank_correlation_coefficient)). Per-image F1 distributions are often non-normal (skewed toward the extremes after NMS + IoU=0.5 matching), and image properties like `blurriness` have heavy tails, so the property-vs-F1 relationship is typically monotonic but not strictly linear. Spearman ranks values before correlating, which handles both, and it is what `effect_band` and `direction` are derived from.
+- **Pearson r** ([Wikipedia](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient)) measures a strictly linear fit. It is reported in parallel mainly as a cross-check. When `pearson_r` and `spearman_r` differ by a lot, the relationship is non-linear or a few extreme images are dominating, so open `correlation_scatter.png` for that property and decide visually.
+- **Sign of r**: negative = *higher property -> lower F1* (property looks like it hurts the model, candidate for augmentation, curation, or relabeling). Positive = *higher property -> higher F1* (looks like it helps, you probably want more of it in training). These are heuristics from the correlation alone, always sanity-check on the scatter plot before changing your pipeline.
+- **Effect band thresholds** are `|spearman_r| >= 0.5` (strong), `>= 0.3` (moderate), `>= 0.1` (weak), otherwise `negligible`. These are the common Cohen-style conventions and match what `summary.md` shows.
+- **`pearson_p`, `spearman_p`, `n`**: standard p-values from `scipy.stats`, and `n` is the image count after dropping NaNs (used both for the correlation and for the significance test). Lower p is more significant. The bands are already a coarser version of this.
 
 ## Caveats
 
