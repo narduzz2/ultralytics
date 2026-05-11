@@ -385,7 +385,8 @@ def test_export_axelera():
 
 
 @pytest.mark.skipif(not LINUX or ARM64, reason="DeepX export only supported on non-aarch64 Linux")
-@pytest.mark.skipif(checks.IS_PYTHON_3_8, reason="dx_com torch mid-run upgrade segfaults DataLoader on Python 3.8")
+@pytest.mark.skipif(IS_PYTHON_MINIMUM_3_12, reason="Requires Python>=3.12 for CI validation")
+
 def test_export_deepx():
     """Test YOLO export to DeepX format."""
     # For faster testing, use a smaller calibration dataset
