@@ -10,7 +10,7 @@ Deploying computer vision models on specialized NPU hardware requires a compatib
 
 ## What is DeepX?
 
-[DeepX](https://www.deepx.ai/) is an AI semiconductor company specializing in Neural Processing Units (NPUs) designed for power-efficient deep learning inference at the edge. DeepX NPUs are engineered for demanding embedded and industrial AI applications, delivering high throughput with minimal power consumption. Their hardware is well suited for deployment scenarios where cloud connectivity is unreliable or undesirable, such as robotics, smart cameras, and industrial automation systems.
+[DeepX](https://www.deepx.ai/) is an AI semiconductor company specializing in Neural Processing Units (NPUs) designed for power-efficient [deep learning](https://www.ultralytics.com/glossary/deep-learning-dl) inference at the edge. DeepX NPUs are engineered for demanding embedded and industrial AI applications, delivering high throughput with minimal power consumption. Their hardware is well suited for deployment scenarios where cloud connectivity is unreliable or undesirable, such as robotics, smart cameras, and industrial automation systems.
 
 ## DeepX Export Format
 
@@ -20,11 +20,23 @@ The DeepX export produces a compiled `.dxnn` model binary that is optimized for 
 
 DeepX models offer several advantages for edge deployment:
 
-- **INT8 Quantization**: Models are quantized to INT8 precision during export, significantly reducing model size and maximizing NPU throughput.
+- **INT8 Quantization**: Models are quantized to INT8 precision during export, significantly reducing model size and maximizing NPU throughput. Learn more about [model quantization](https://www.ultralytics.com/glossary/model-quantization).
 - **NPU-Optimized**: The `.dxnn` format is specifically compiled for DeepX NPU hardware, leveraging dedicated acceleration units for fast, efficient inference.
 - **Low Power Consumption**: By offloading inference to the NPU, DeepX models consume far less power than equivalent CPU or GPU inference.
 - **Calibration-Based Accuracy**: The export uses EMA-based calibration with real dataset images to minimize accuracy loss during quantization.
 - **Self-Contained Output**: The exported model directory bundles the compiled binary, calibration config, and metadata for straightforward deployment.
+
+## Supported Tasks
+
+All standard Ultralytics tasks are supported for DeepX export across YOLO26, YOLO11, and YOLOv8 model families.
+
+| Task                                                           | Supported |
+| :------------------------------------------------------------- | :-------- |
+| [Object Detection](https://docs.ultralytics.com/tasks/detect/) | ✅        |
+| [Segmentation](https://docs.ultralytics.com/tasks/segment/)    | ✅        |
+| [Pose Estimation](https://docs.ultralytics.com/tasks/pose/)    | ✅        |
+| [OBB Detection](https://docs.ultralytics.com/tasks/obb/)       | ✅        |
+| [Classification](https://docs.ultralytics.com/tasks/classify/) | ✅        |
 
 ## Export to DeepX: Converting Your YOLO Model
 
@@ -95,12 +107,10 @@ For more details about the export process, visit the [Ultralytics documentation 
 
 After a successful export, a model directory is created with the following layout:
 
-```
-yolo26n_deepx_model/
-├── yolo26n.dxnn     # Compiled DeepX model binary (NPU executable)
-├── config.json      # Calibration and preprocessing configuration
-└── metadata.yaml    # Model metadata (classes, image size, task, etc.)
-```
+    yolo26n_deepx_model/
+    ├── yolo26n.dxnn     # Compiled DeepX model binary (NPU executable)
+    ├── config.json      # Calibration and preprocessing configuration
+    └── metadata.yaml    # Model metadata (classes, image size, task, etc.)
 
 The `.dxnn` file is the compiled model binary that the `dx_engine` runtime loads directly on the NPU. The `metadata.yaml` contains class names, image size, and other information used by the Ultralytics inference pipeline.
 
@@ -196,11 +206,19 @@ dxtron yolo26n_deepx_model/yolo26n.dxnn
 
     `dxtron` is only available for **x86-64 Linux**. ARM64/aarch64 and non-Linux platforms are not supported.
 
+## Recommended Workflow
+
+1. **Train** your model using Ultralytics [Train Mode](../modes/train.md)
+2. **Export** to DeepX format using `model.export(format="deepx")`
+3. **Validate** accuracy with `yolo val` to verify minimal quantization loss
+4. **Predict** using `yolo predict` for qualitative validation
+5. **Deploy** the exported `_deepx_model/` directory to DeepX NPU hardware using the `dx_engine` runtime
+
 ## Real-World Applications
 
-YOLO models deployed on DeepX NPU hardware are well suited for a wide range of edge AI applications:
+YOLO models deployed on DeepX NPU hardware are well suited for a wide range of [edge AI](https://www.ultralytics.com/glossary/edge-ai) applications:
 
-- **Smart Surveillance**: Real-time object detection for security and monitoring systems with low power consumption and no cloud dependency.
+- **Smart Surveillance**: Real-time [object detection](https://www.ultralytics.com/glossary/object-detection) for security and monitoring systems with low power consumption and no cloud dependency.
 - **Industrial Automation**: On-device quality control, defect detection, and process monitoring in factory environments.
 - **Robotics**: Vision-based navigation, obstacle avoidance, and object recognition on autonomous robots and drones.
 - **Smart Agriculture**: Crop health monitoring, pest detection, and yield estimation using [computer vision in agriculture](https://www.ultralytics.com/solutions/ai-in-agriculture).
@@ -210,7 +228,7 @@ YOLO models deployed on DeepX NPU hardware are well suited for a wide range of e
 
 In this guide, you've learned how to export Ultralytics YOLO models to DeepX format and deploy them on DeepX NPU hardware. The export pipeline uses INT8 calibration and the `dx_com` compiler to produce a hardware-optimized `.dxnn` binary, while the `dx_engine` runtime handles inference on the device.
 
-The combination of [Ultralytics YOLO](https://www.ultralytics.com/yolo) and DeepX's NPU technology provides an effective solution for running advanced computer vision workloads on embedded and edge devices — delivering high throughput with low power consumption for real-time applications.
+The combination of [Ultralytics YOLO](https://www.ultralytics.com/yolo) and DeepX's NPU technology provides an effective solution for running advanced [computer vision](https://www.ultralytics.com/glossary/computer-vision-cv) workloads on embedded and edge devices — delivering high throughput with low power consumption for real-time applications.
 
 For further details on usage, visit the [DeepX official website](https://www.deepx.ai/).
 
