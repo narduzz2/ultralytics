@@ -11,6 +11,7 @@ import scipy.linalg
 import torch
 
 from ultralytics.utils.metrics import bbox_ioa
+
 from ..utils import LOGGER
 from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
