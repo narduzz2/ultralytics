@@ -6,7 +6,6 @@ from collections import deque
 from typing import Any
 
 import numpy as np
-import torch
 
 from .basetrack import TrackState
 from .byte_tracker import BYTETracker, STrack

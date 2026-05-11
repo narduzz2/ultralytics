@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-import torch
 
 from .byte_tracker import STrack
 from .oc_sort import OCSORT, OCSortTrack
