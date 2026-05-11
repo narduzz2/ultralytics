@@ -15,7 +15,7 @@ from .base import BaseBackend
 class DeepXBackend(BaseBackend):
     """DeepX NPU inference backend for DeepX hardware accelerators.
 
-    Loads compiled DeepX models (.dxnn files) and runs inference using the DeepX dx_engine runtime.
+    Loads compiled DeepX models (.dxnn files) and runs inference using the DeepX DX-Runtime.
     """
 
     def load_model(self, weight: str | Path) -> None:
@@ -32,7 +32,7 @@ class DeepXBackend(BaseBackend):
             from dx_engine import InferenceEngine
         except ImportError as e:
             raise ImportError(
-                "DeepX inference requires the DeepX runtime and `dx_engine` Python package. "
+                "DeepX inference requires the DeepX DX-Runtime and `dx_engine` Python package. "
                 "See https://docs.ultralytics.com/integrations/deepx/#runtime-installation for installation instructions."
             ) from e
 
