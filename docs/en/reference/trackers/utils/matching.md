@@ -23,14 +23,6 @@ keywords: Ultralytics, matching utils, linear assignment, IoU distance, embeddin
 
 <br><br><hr><br>
 
-## ::: ultralytics.trackers.utils.matching.iou_matrix
-
-<br><br><hr><br>
-
-## ::: ultralytics.trackers.utils.matching.coverage_matrix
-
-<br><br><hr><br>
-
 ## ::: ultralytics.trackers.utils.matching.fuse_score
 
 <br><br>

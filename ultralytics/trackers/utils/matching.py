@@ -129,45 +129,6 @@ def embedding_distance(tracks: list, detections: list, metric: str = "cosine") -
     return cost_matrix
 
 
-def iou_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
-    """Compute the pairwise IoU similarity matrix between two sets of xyxy boxes.
-
-    Args:
-        boxes_a (np.ndarray): Array of shape `(N, 4)` in `(x1, y1, x2, y2)` format.
-        boxes_b (np.ndarray): Array of shape `(M, 4)` in the same format.
-
-    Returns:
-        (np.ndarray): Float32 `(N, M)` IoU matrix; an empty `(N, M)` array if either input is empty.
-
-    Examples:
-        >>> ious = iou_matrix(np.array([[0, 0, 10, 10]]), np.array([[5, 5, 15, 15]]))
-    """
-    if boxes_a.size == 0 or boxes_b.size == 0:
-        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
-    return bbox_ioa(boxes_a, boxes_b, iou=True).astype(np.float32)
-
-
-def coverage_matrix(boxes_a: np.ndarray, boxes_b: np.ndarray) -> np.ndarray:
-    """Compute the asymmetric coverage matrix `intersection(a, b) / area(a)`.
-
-    Preferred over IoU for occlusion detection: a small box hidden behind a large one has high coverage from the small
-    box's side but potentially low IoU.
-
-    Args:
-        boxes_a (np.ndarray): `(N, 4)` xyxy boxes; candidates for being covered.
-        boxes_b (np.ndarray): `(M, 4)` xyxy boxes; candidate occluders.
-
-    Returns:
-        (np.ndarray): Float32 `(N, M)` matrix where entry `[i, j]` equals `intersection(a_i, b_j) / area(a_i)`.
-    """
-    if boxes_a.size == 0 or boxes_b.size == 0:
-        return np.zeros((len(boxes_a), len(boxes_b)), dtype=np.float32)
-    # `bbox_ioa(box1, box2, iou=False)` returns `inter / area(box2)`. We want
-    # `inter / area(boxes_a)`, so pass `(boxes_b, boxes_a)` to put `area_a` in the
-    # denominator, then transpose to put rows over `boxes_a` (N, M).
-    return bbox_ioa(boxes_b, boxes_a, iou=False).T.astype(np.float32)
-
-
 def fuse_score(cost_matrix: np.ndarray, detections: list) -> np.ndarray:
     """Fuse cost matrix with detection scores to produce a single cost matrix.
 

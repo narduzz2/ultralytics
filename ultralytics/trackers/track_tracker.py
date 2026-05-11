@@ -10,12 +10,12 @@ import numpy as np
 import scipy.linalg
 import torch
 
+from ultralytics.utils.metrics import bbox_ioa
 from ..utils import LOGGER
 from ..utils.ops import xywh2ltwh
 from .basetrack import BaseTrack, TrackState
 from .utils.gmc import GMC
 from .utils.kalman_filter import KalmanFilterXYWH
-from .utils.matching import iou_matrix
 from .utils.stracks import joint_stracks, merge_track_pools, multi_gmc
 
 # Corner index arrays (LT, LB, RT, RB of an (x1,y1,x2,y2) box) for angle-distance vectorization.
@@ -51,7 +51,7 @@ def _hmiou_distance(tracks_a: list, tracks_b: list) -> tuple[np.ndarray, np.ndar
         return np.zeros((n, m), dtype=np.float64), np.ones((n, m), dtype=np.float64)
     boxes_a = np.ascontiguousarray([track.xyxy for track in tracks_a], dtype=np.float64)
     boxes_b = np.ascontiguousarray([track.xyxy for track in tracks_b], dtype=np.float64)
-    iou_sim = iou_matrix(boxes_a, boxes_b)
+    iou_sim = bbox_ioa(boxes_a, boxes_b, iou=True)
     h_over = np.minimum(boxes_a[:, 3:4], boxes_b[:, 3:4].T) - np.maximum(boxes_a[:, 1:2], boxes_b[:, 1:2].T)
     h_union = np.maximum(boxes_a[:, 3:4], boxes_b[:, 3:4].T) - np.minimum(boxes_a[:, 1:2], boxes_b[:, 1:2].T)
     h_iou = np.clip(h_over / (h_union + 1e-9), 0, 1)
@@ -127,7 +127,7 @@ def _track_aware_nms(tracks: list, dets: list, tai_thr: float, init_thr: float) 
     if len(tracks) + len(dets) < 2:
         return allow
     boxes = np.ascontiguousarray([obj.xyxy for obj in tracks + dets], dtype=np.float64)
-    iou = iou_matrix(boxes, boxes)
+    iou = bbox_ioa(boxes, boxes, iou=True)
     n_tracks = len(tracks)
     n_dets = len(dets)
     for i in range(n_dets):
@@ -257,11 +257,11 @@ class TTSTrack(BaseTrack):
     _alpha = 0.95
     _delta_t = 3
 
-    def __init__(self, xywh: np.ndarray | list[float], score: float, cls: Any, feat: np.ndarray | None = None):
+    def __init__(self, xywh: np.ndarray, score: float, cls: Any, feat: np.ndarray | None = None):
         """Initialize a TTSTrack from a detection bounding box.
 
         Args:
-            xywh (list[float]): `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)`, center-based with detection index.
+            xywh (np.ndarray): `(x, y, w, h, idx)` or `(x, y, w, h, angle, idx)`, center-based with detection index.
             score (float): Detection confidence.
             cls (Any): Class label.
             feat (np.ndarray | None): Optional ReID feature vector.

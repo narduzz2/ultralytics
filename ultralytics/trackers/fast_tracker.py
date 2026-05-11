@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 
+from ultralytics.utils.metrics import bbox_ioa
 from .basetrack import TrackState
 from .byte_tracker import BYTETracker, STrack
 from .utils import matching
@@ -40,11 +41,11 @@ class FastSTrack(STrack):
         1
     """
 
-    def __init__(self, xywh: np.ndarray | list[float], score: float, cls: Any, history_len: int = 16):
+    def __init__(self, xywh: np.ndarray, score: float, cls: Any, history_len: int = 16):
         """Initialize a FastSTrack.
 
         Args:
-            xywh (list[float]): Bounding box in ``(x, y, w, h, idx)`` or ``(x, y, w, h, angle, idx)`` format.
+            xywh (np.ndarray): Bounding box in ``(x, y, w, h, idx)`` or ``(x, y, w, h, angle, idx)`` format.
             score (float): Detection confidence in `[0, 1]`.
             cls (Any): Class label for the detection.
             history_len (int): Maximum number of past Kalman mean vectors kept for occlusion rollback.
@@ -280,7 +281,7 @@ class FASTTracker(BYTETracker):
             if det.score < self.args.new_track_thresh:
                 continue
             if suppress_on and active_stack is not None:
-                if matching.iou_matrix(det.xyxy[None, :], active_stack).max() >= self.init_iou_suppress:
+                if matching.bbox_ioa(det.xyxy[None, :], active_stack, iou=True).max() >= self.init_iou_suppress:
                     continue
             det.activate(self.kalman_filter, self.frame_id)
             activated_stracks.append(det)
@@ -343,7 +344,7 @@ class FASTTracker(BYTETracker):
         )
 
         if active_boxes.size and unmatched_boxes.size:
-            cov = matching.coverage_matrix(unmatched_boxes, active_boxes)  # (U, A)
+            cov = bbox_ioa(unmatched_boxes, active_boxes)  # (U, A)
             # Avoid self-match: zero out columns that correspond to the same track id.
             unm_ids = np.asarray([t.track_id for t in unmatched])
             same = unm_ids[:, None] == active_ids[None, :]
