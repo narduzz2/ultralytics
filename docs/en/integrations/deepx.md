@@ -124,11 +124,14 @@ sudo apt install -y dkms
 # Install the NPU driver and libdxrt runtime
 wget https://github.com/DEEPX-AI/dx_rt_npu_linux_driver/raw/main/release/2.4.0/dxrt-driver-dkms_2.4.0-2_all.deb
 sudo dpkg -i dxrt-driver-dkms_2.4.0-2_all.deb
-wget https://github.com/DEEPX-AI/dx_rt/raw/main/release/3.3.1/libdxrt_3.3.1_all.deb
-sudo dpkg -i libdxrt_3.3.1_all.deb
+wget https://github.com/DEEPX-AI/dx_rt/raw/refs/heads/staging/release/3.3.2/libdxrt_3.3.2_all.deb
+sudo dpkg -i libdxrt_3.3.2_all.deb
+
+# Create dx-engine wheel
+cd /usr/share/libdxrt/python_package && sudo ./make_whl.sh
 
 # Install the bundled dx_engine Python wheel
-pip install /usr/share/libdxrt/src/python_package/dx_engine-*.whl
+pip install dx_engine-*.whl
 ```
 
 Verify the runtime is installed correctly with `dxrt-cli --version`. You should see output similar to:
