@@ -406,7 +406,6 @@ class Tuner:
 
         # Mutate if we have data, otherwise use defaults
         if x is not None:
-            # Isolated Generator avoids global RNG collisions when sub-second iterations share int(time.time())
             rng = np.random.default_rng()
             ng = len(self.space)
 
