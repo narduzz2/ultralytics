@@ -7,7 +7,7 @@ keywords: onnx2deepx, DeepX export, dx_com, ONNX, model conversion, Ultralytics,
 
 !!! success "Improvements"
 
-    This page is sourced from [https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/export/deepx.py](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/export/deepx.py). Have an improvement or example to add? Open a [Pull Request](https://docs.ultralytics.com/help/contributing/) — thank you! 🙏
+    This page is sourced from [https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/export/deepx.py](https://github.com/ultralytics/ultralytics/blob/main/ultralytics/utils/export/deepx.py). Have an improvement or example to add? Open a [Pull Request](https://docs.ultralytics.com/help/contributing) — thank you! 🙏
 
 <br>
 
