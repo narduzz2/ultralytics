@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
-import cv2
-import torch
 import numpy as np
 
 from ultralytics.data.augment import LetterBox
@@ -39,34 +35,22 @@ class SemanticSegmentationPredictor(BasePredictor):
         self.args.task = "semseg"
 
     def pre_transform(self, im: list[np.ndarray]) -> list[np.ndarray]:
-        """Short-side scale to imgsz and pad to stride multiples."""
-        imgsz = self.imgsz[0] if isinstance(self.imgsz, (list, tuple)) else self.imgsz
-        stride_t = self.model.stride
-        stride = int(stride_t.max() if hasattr(stride_t, "max") else stride_t)
-
+        """Letterbox images top-left aligned; minimum-rectangle padding when backend accepts dynamic shapes."""
         # Static-shape backend (e.g. OpenVINO/TensorRT exported with dynamic=False):
-        # model input is fixed to (imgsz, imgsz); fall back to square letterbox.
+        # model input is fixed; letterbox to the (h, w) imgsz read from export metadata.
         is_dynamic = self.model.format == "pt" or getattr(self.model, "dynamic", False)
         if not is_dynamic:
-            letterbox = LetterBox(new_shape=(imgsz, imgsz), auto=False, scaleup=False, center=False, stride=stride)
+            letterbox = LetterBox(self.imgsz, auto=False, scaleup=False, center=False)
             return [letterbox(image=x) for x in im]
 
-        scaled = []
-        for x in im:
-            h0, w0 = x.shape[:2]
-            r = imgsz / min(h0, w0)
-            if r != 1:
-                if h0 < w0:
-                    h, w = imgsz, math.ceil(w0 * r)
-                else:
-                    h, w = math.ceil(h0 * r), imgsz
-                x = cv2.resize(x, (w, h), interpolation=cv2.INTER_LINEAR)
-            scaled.append(x)
-
-        rect_h = math.ceil(max(x.shape[0] for x in scaled) / stride) * stride
-        rect_w = math.ceil(max(x.shape[1] for x in scaled) / stride) * stride
-        letterbox = LetterBox(auto=False, scaleup=False, center=False, stride=stride)
-        return [letterbox({"rect_shape": (rect_h, rect_w)}, image=x) for x in scaled]
+        same_shapes = len({x.shape for x in im}) == 1
+        letterbox = LetterBox(
+            self.imgsz,
+            auto=same_shapes and self.args.rect,
+            center=False,
+            stride=self.model.stride,
+        )
+        return [letterbox(image=x) for x in im]
 
     def postprocess(self, preds, img, orig_imgs):
         """Convert model logits to semantic segmentation results.
