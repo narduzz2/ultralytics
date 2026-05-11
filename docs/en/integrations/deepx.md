@@ -138,7 +138,7 @@ sudo apt install -y dkms
 # Install the NPU driver and libdxrt runtime
 wget https://github.com/DEEPX-AI/dx_rt_npu_linux_driver/raw/main/release/2.4.0/dxrt-driver-dkms_2.4.0-2_all.deb
 sudo dpkg -i dxrt-driver-dkms_2.4.0-2_all.deb
-wget https://github.com/DEEPX-AI/dx_rt/raw/refs/heads/staging/release/3.3.2/libdxrt_3.3.2_all.deb
+wget https://github.com/DEEPX-AI/dx_rt/raw/main/release/3.3.2/libdxrt_3.3.2_all.deb
 sudo dpkg -i libdxrt_3.3.2_all.deb
 
 # Create dx-engine wheel
@@ -151,7 +151,7 @@ pip install dx_engine-*.whl
 Verify the runtime is installed correctly with `dxrt-cli --version`. You should see output similar to:
 
 ```sh
-DXRT v3.3.1
+DXRT v3.3.2
 Minimum Driver Versions
 Device Driver: v2.4.0
 PCIe Driver: v2.2.0
@@ -267,7 +267,7 @@ DeepX NPUs are designed to execute INT8 computations at maximum efficiency. The 
 
 ### What platforms are supported for DeepX export?
 
-DeepX model export (compilation) requires an **x86-64 Linux** host. The export step is not supported on ARM64, aarch64 and Windows machines. Inference using the exported `.dxnn` model can be run on any Linux platform (x86-64 and ARM64) supported by the `dx_engine` runtime.
+DeepX model export (compilation) requires an **x86-64 Linux** host. The export step is not supported on ARM64 (aarch64) and Windows machines. Inference using the exported `.dxnn` model can be run on any Linux platform (x86-64 and ARM64) supported by the `dx_engine` runtime.
 
 ### What is the output of a DeepX export?
 
