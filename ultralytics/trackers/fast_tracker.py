@@ -40,7 +40,7 @@ class FastSTrack(STrack):
         1
     """
 
-    def __init__(self, xywh: list[float], score: float, cls: Any, history_len: int = 16):
+    def __init__(self, xywh: np.ndarray | list[float], score: float, cls: Any, history_len: int = 16):
         """Initialize a FastSTrack.
 
         Args:

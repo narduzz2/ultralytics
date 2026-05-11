@@ -32,7 +32,7 @@ class DeepOCSortTrack(OCSortTrack):
 
     def __init__(
         self,
-        xywh: list[float],
+        xywh: np.ndarray | list[float],
         score: float,
         cls: Any,
         delta_t: int = 3,
@@ -81,7 +81,7 @@ class DeepOCSortTrack(OCSortTrack):
             self.smooth_feat = feat
         else:
             if score is not None and score > self.det_thresh:
-                trust = (score - self.det_thresh) / (1 - self.det_thresh)
+                trust = (score - self.det_thresh) / max(1 - self.det_thresh, 1e-9)
                 alpha = self.alpha_fixed_emb + (1 - self.alpha_fixed_emb) * (1 - trust)
             else:
                 alpha = 1.0
@@ -170,7 +170,7 @@ class DeepOCSORT(OCSORT):
     - GMC correctly handles XYAH state (rotates only x,y positions, not aspect ratio/height)
     - Cost combination uses min(IoU, appearance) following BOTSORT's proven approach
     - OCR recovery pass also uses appearance features
-    - ByteTrack-style low-confidence second pass enabled by default
+    - ByteTrack-style low-confidence second pass disabled by default
     """
 
     def __init__(self, args: Any, frame_rate: int = 30):

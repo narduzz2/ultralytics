@@ -53,7 +53,7 @@ class STrack(BaseTrack):
 
     shared_kalman = KalmanFilterXYAH()
 
-    def __init__(self, xywh: list[float], score: float, cls: Any):
+    def __init__(self, xywh: np.ndarray | list[float], score: float, cls: Any):
         """Initialize a new STrack instance.
 
         Args:
@@ -302,7 +302,8 @@ class BYTETracker:
             # use try-except here to bypass errors from gmc module
             try:
                 warp = self.gmc.apply(img, results.xyxy)
-            except Exception:
+            except Exception as e:
+                LOGGER.warning(f"GMC failed, falling back to identity: {e}")
                 warp = np.eye(2, 3)
             STrack.multi_gmc(strack_pool, warp)
             STrack.multi_gmc(unconfirmed, warp)

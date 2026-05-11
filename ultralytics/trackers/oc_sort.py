@@ -25,7 +25,7 @@ class OCSortTrack(STrack):
         delta_t (int): Temporal window for velocity computation.
     """
 
-    def __init__(self, xywh: list[float], score: float, cls: Any, delta_t: int = 3):
+    def __init__(self, xywh: np.ndarray | list[float], score: float, cls: Any, delta_t: int = 3):
         """Initialize an OCSortTrack with observation storage.
 
         Args:
@@ -194,9 +194,9 @@ class OCSORT(BYTETracker):
             frame_rate (int): Source video frame rate.
         """
         super().__init__(args, frame_rate)
-        self.delta_t = args.delta_t
-        self.inertia = args.inertia
-        self.use_byte = args.use_byte
+        self.delta_t = getattr(args, "delta_t", 3)
+        self.inertia = getattr(args, "inertia", 0.2)
+        self.use_byte = getattr(args, "use_byte", False)
 
     def init_track(self, results, img: np.ndarray | None = None) -> list[OCSortTrack]:
         """Build :class:`OCSortTrack` instances from a `Results`-like object."""
