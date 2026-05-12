@@ -250,6 +250,7 @@ class Exporter:
         export_imx: Export model to IMX format.
         export_executorch: Export model to ExecuTorch format.
         export_axelera: Export model to Axelera format.
+        export_deepx: Export model to DeepX format.
 
     Examples:
         Export a YOLO26 model to ONNX format
