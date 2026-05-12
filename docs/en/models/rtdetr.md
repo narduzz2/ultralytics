@@ -53,7 +53,7 @@ The Ultralytics Python API provides pretrained PaddlePaddle RT-DETR models with 
     results = model("path/to/image.jpg")
 
     # Export uses the same decoder setting, including TensorRT exports.
-    model.export(format="engine", device=0)
+    model.export(format="engine", device=0, half=True)
     ```
 
 Additionally, Baidu has released RTDETRv2 in July 2024, which further improves upon the original architecture with enhanced performance metrics.
