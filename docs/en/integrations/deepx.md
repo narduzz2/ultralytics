@@ -129,15 +129,12 @@ Inference requires the DeepX NPU driver, the `libdxrt` runtime, and the `dx_engi
     DeepX runtime is only supported on x86-64 Linux machines and ARM64 Debian Trixie machines (Raspberry Pi 5).
 
 ```bash
-# Build dependencies for the DKMS NPU driver module
-sudo apt update
-sudo apt install -y dkms
-
 # Install the NPU driver and libdxrt runtime
+sudo apt update
 wget https://github.com/DEEPX-AI/dx_rt_npu_linux_driver/raw/main/release/2.4.0/dxrt-driver-dkms_2.4.0-2_all.deb
-sudo dpkg -i dxrt-driver-dkms_2.4.0-2_all.deb
+sudo apt install ./dxrt-driver-dkms_2.4.0-2_all.deb
 wget https://github.com/DEEPX-AI/dx_rt/raw/main/release/3.3.2/libdxrt_3.3.2_all.deb
-sudo dpkg -i libdxrt_3.3.2_all.deb
+sudo apt install ./libdxrt_3.3.2_all.deb
 
 # Create dx-engine wheel
 cd /usr/share/libdxrt/python_package && sudo ./make_whl.sh
@@ -151,12 +148,12 @@ Verify the runtime is installed correctly with `dxrt-cli --version`. You should 
 ```sh
 DXRT v3.3.2
 Minimum Driver Versions
-Device Driver: v2.4.0
-PCIe Driver: v2.2.0
-Firmware: v2.5.2
+  Device Driver: v2.4.0
+  PCIe Driver: v2.2.0
+  Firmware: v2.5.2
 Minimum Compiler Versions
-Compiler: v1.18.1
-.dxnn File Format: v6
+  Compiler: v1.18.1
+  .dxnn File Format: v6
 ```
 
 ### Usage
@@ -207,6 +204,36 @@ dxtron yolo26n_deepx_model/yolo26n.dxnn
 !!! note
 
     `dxtron` is only available for **x86-64 Linux**. ARM64/aarch64 and non-Linux platforms are not supported.
+
+## Benchmarks
+
+The Ultralytics team benchmarked YOLO26 models, comparing speed and accuracy between PyTorch and DeepX.
+
+!!! tip "Performance"
+
+    === "Raspberry Pi 5 + DX-M1 M.2 Module"
+
+        | Model        	| Format  	| Status 	| Size (MB) 	| metrics/mAP50-95(B) 	| Inference time (ms/im) 	|
+        |--------------	|---------	|--------	|-----------	|---------------------	|------------------------	|
+        | YOLO26n      	| PyTorch 	| ✅      	| 5.3       	| 0.4760              	| 315.2                  	|
+        | YOLO26n      	| DeepX   	| ✅      	| 6.6       	| 0.4660              	| 34.6                   	|
+        | YOLO26n-seg  	| PyTorch 	| ✅      	| 6.5       	| 0.4080              	| 485.4                  	|
+        | YOLO26n-seg  	| DeepX   	| ✅      	| 7.9       	| 0.3920              	| 53.8                   	|
+        | YOLO26n-pose 	| PyTorch 	| ✅      	| 7.6       	| 0.4230              	| 506.3                  	|
+        | YOLO26n-pose 	| DeepX   	| ✅      	| 8.8       	| 0.4590              	| 37.6                   	|
+        | YOLO26n-obb  	| PyTorch 	| ✅      	| 5.7       	| 0.817               	| 1094.4                 	|
+        | YOLO26n-obb  	| DeepX   	| ✅      	| 7.3       	| 0.783               	| 56.4                   	|
+
+        | Model       	| Format  	| Status 	| Size (MB) 	| acc (top1) 	| acc (top5) 	| Inference time (ms/im) 	|
+        |-------------	|---------	|--------	|-----------	|------------	|------------	|------------------------	|
+        | YOLO26n-cls 	| PyTorch 	| ✅      	| 5.6       	| 0.431      	| 0.716      	| 23.8                   	|
+        | YOLO26n-cls 	| DeepX   	| ✅      	| 5.9       	| 0.333      	| 0.686      	| 2.7                    	|
+        
+    Benchmarked with Ultralytics 8.4.48
+
+    !!! note
+
+        Validation for the above benchmarks were done using coco128 for detection, coco128-seg for segmentation, coco8-pose for pose estimation, imagenet100 for classification and dota128 for OBB models. Inference time does not include pre/ post-processing.
 
 ## Recommended Workflow
 
