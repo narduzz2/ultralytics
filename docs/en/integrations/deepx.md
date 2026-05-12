@@ -148,12 +148,12 @@ Verify the runtime is installed correctly with `dxrt-cli --version`. You should 
 ```sh
 DXRT v3.3.2
 Minimum Driver Versions
-  Device Driver: v2.4.0
-  PCIe Driver: v2.2.0
-  Firmware: v2.5.2
+Device Driver: v2.4.0
+PCIe Driver: v2.2.0
+Firmware: v2.5.2
 Minimum Compiler Versions
-  Compiler: v1.18.1
-  .dxnn File Format: v6
+Compiler: v1.18.1
+.dxnn File Format: v6
 ```
 
 ### Usage
@@ -228,7 +228,7 @@ The Ultralytics team benchmarked YOLO26 models, comparing speed and accuracy bet
         |-------------	|---------	|--------	|-----------	|------------	|------------	|------------------------	|
         | YOLO26n-cls 	| PyTorch 	| ✅      	| 5.6       	| 0.431      	| 0.716      	| 23.8                   	|
         | YOLO26n-cls 	| DeepX   	| ✅      	| 5.9       	| 0.333      	| 0.686      	| 2.7                    	|
-        
+
     Benchmarked with Ultralytics 8.4.48
 
     !!! note
