@@ -323,7 +323,6 @@ class Exporter:
             if not self.args.int8:
                 LOGGER.warning("DeepX export requires int8=True, setting int8=True.")
                 self.args.int8 = True
-
         if fmt == "axelera":
             if model.task == "segment" and any(isinstance(m, Segment26) for m in model.modules()):
                 raise ValueError("Axelera export does not currently support YOLO26 segmentation models.")
