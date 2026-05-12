@@ -36,18 +36,20 @@ class SemanticSegmentationPredictor(BasePredictor):
         self.args.task = "semseg"
 
     def pre_transform(self, im: list[np.ndarray]) -> list[np.ndarray]:
-        """Letterbox images top-left aligned; minimum-rectangle padding when backend accepts dynamic shapes."""
-        # Static-shape backend (e.g. OpenVINO/TensorRT exported with dynamic=False):
-        # model input is fixed; letterbox to the (h, w) imgsz read from export metadata.
-        is_dynamic = self.model.format == "pt" or getattr(self.model, "dynamic", False)
-        if not is_dynamic:
-            letterbox = LetterBox(self.imgsz, auto=False, scaleup=False, center=False)
-            return [letterbox(image=x) for x in im]
+        """Pre-transform input image before inference using top-left aligned letterbox.
 
+        Args:
+            im (list[np.ndarray]): List of images with shape [(H, W, 3) x N].
+
+        Returns:
+            (list[np.ndarray]): List of transformed images.
+        """
         same_shapes = len({x.shape for x in im}) == 1
         letterbox = LetterBox(
             self.imgsz,
-            auto=same_shapes and self.args.rect,
+            auto=same_shapes
+            and self.args.rect
+            and (self.model.format == "pt" or (getattr(self.model, "dynamic", False) and self.model.format != "imx")),
             center=False,
             stride=self.model.stride,
         )
