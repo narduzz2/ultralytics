@@ -17,7 +17,7 @@ def onnx2deepx(
     optimize: bool = False,
     prefix: str = "",
 ) -> Path:
-    """Convert an ONNX model to DeepX format using the DeepX CLI tools.
+    """Convert an ONNX model to DeepX format using the DeepX DX-Compiler.
 
     Args:
         onnx_file (str | Path): Input ONNX model path.
@@ -36,7 +36,6 @@ def onnx2deepx(
     except ImportError:
         check_requirements("dx_com", cmds="-f https://sdk.deepx.ai/release/dxcom/v2.3.0/index.html")
         import dx_com
-    import onnx
 
     LOGGER.info(f"\n{prefix} starting export with DeepX...")
 
@@ -45,15 +44,12 @@ def onnx2deepx(
     export_path.mkdir(exist_ok=True)
     config_path = export_path / "config.json"
 
-    input_name = onnx.load(str(onnx_file)).graph.input[0].name
-    calib_dir = dataset.dataset.img_path
-
     config = {
-        "inputs": {input_name: [1, 3, imgsz[0], imgsz[1]]},
+        "inputs": {"images": [1, 3, imgsz[0], imgsz[1]]},
         "calibration_num": 100,  # number of steps used during calibration
         "calibration_method": "ema",  # calibration method used during quantization
         "default_loader": {
-            "dataset_path": calib_dir,
+            "dataset_path": dataset.dataset.img_path,
             "file_extensions": [val for x in ["jpeg", "jpg", "png"] for val in (x.lower(), x.upper())],
             "preprocessings": [
                 {"resize": {"mode": "pad", "size": imgsz[0], "pad_location": "edge", "pad_value": [114, 114, 114]}},
