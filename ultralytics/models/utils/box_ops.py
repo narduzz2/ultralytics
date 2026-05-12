@@ -89,3 +89,36 @@ def aligned_giou(
     cover_wh = (cover_rb - cover_lt).clamp(min=0)
     cover_area = cover_wh[:, 0] * cover_wh[:, 1]
     return iou - (cover_area - union) / cover_area.clamp(min=eps)
+
+
+def aligned_box_iou_old(boxes1: torch.Tensor, boxes2: torch.Tensor, xywh: bool = False) -> torch.Tensor:
+    """Compute legacy element-wise IoU for matched box pairs without upcasting or eps clamps."""
+    if xywh:
+        boxes1 = box_cxcywh_to_xyxy(boxes1)
+        boxes2 = box_cxcywh_to_xyxy(boxes2)
+
+    inter_lt = torch.max(boxes1[:, :2], boxes2[:, :2])
+    inter_rb = torch.min(boxes1[:, 2:], boxes2[:, 2:])
+    inter_wh = (inter_rb - inter_lt).clamp(min=0)
+    inter = inter_wh[:, 0] * inter_wh[:, 1]
+    union = box_area(boxes1) + box_area(boxes2) - inter
+    return inter / union
+
+
+def aligned_giou_old(boxes1: torch.Tensor, boxes2: torch.Tensor, xywh: bool = False) -> torch.Tensor:
+    """Compute legacy element-wise GIoU for matched box pairs without upcasting or eps clamps."""
+    if xywh:
+        boxes1 = box_cxcywh_to_xyxy(boxes1)
+        boxes2 = box_cxcywh_to_xyxy(boxes2)
+
+    iou = aligned_box_iou_old(boxes1, boxes2)
+    cover_lt = torch.min(boxes1[:, :2], boxes2[:, :2])
+    cover_rb = torch.max(boxes1[:, 2:], boxes2[:, 2:])
+    cover_wh = (cover_rb - cover_lt).clamp(min=0)
+    cover_area = cover_wh[:, 0] * cover_wh[:, 1]
+    inter_lt = torch.max(boxes1[:, :2], boxes2[:, :2])
+    inter_rb = torch.min(boxes1[:, 2:], boxes2[:, 2:])
+    inter_wh = (inter_rb - inter_lt).clamp(min=0)
+    inter = inter_wh[:, 0] * inter_wh[:, 1]
+    union = box_area(boxes1) + box_area(boxes2) - inter
+    return iou - (cover_area - union) / cover_area

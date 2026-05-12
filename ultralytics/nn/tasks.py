@@ -1040,6 +1040,13 @@ class RTDETRDetectionModel(DetectionModel):
         self._maybe_trap_nonfinite_dfine_boxes(dec_bboxes, enabled=supports_dfine)
 
         args = getattr(self, "args", None)
+        debug_old_aligned_giou = (
+            args.get("debug_old_aligned_giou", False)
+            if isinstance(args, dict)
+            else getattr(args, "debug_old_aligned_giou", False)
+        )
+        if hasattr(self.criterion, "debug_old_aligned_giou"):
+            self.criterion.debug_old_aligned_giou = bool(debug_old_aligned_giou)
         strict_loss_fp32 = supports_dfine and (
             args.get("strict_loss_fp32", False) if isinstance(args, dict) else getattr(args, "strict_loss_fp32", False)
         )
